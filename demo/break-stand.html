@@ -130,8 +130,13 @@
           transition: color .2s; -webkit-tap-highlight-color: transparent; user-select: none; }
   .skip:hover   { color: rgba(255,255,255,.82); }
   .skip.holding { color: var(--amber-soft); }
-  .skip:focus          { outline: none; }
-  .skip:focus-visible  { outline: 2px solid var(--amber); outline-offset: 8px; border-radius: 22px; }
+  /* FIX: 焦点环只在用户真的用 Tab 导航时才出现。
+     :focus-visible 取决于浏览器的「输入模态」—— 按过 Esc 之后模态切到键盘,
+     下一轮 showModal() 时焦点若落到按钮上就会画环。这里用 body.kbd 显式
+     闸门取代浏览器的启发式判定,Esc / 鼠标都不会点亮它。 */
+  .skip:focus,
+  .skip:focus-visible          { outline: none; }
+  body.kbd .skip:focus-visible { outline: 2px solid var(--amber); outline-offset: 8px; border-radius: 22px; }
 
   .skip svg { width: 26px; height: 26px; overflow: visible; display: block; }
   .skip .trk { fill: none; stroke: currentColor; stroke-width: 1.4; opacity: .42; }
@@ -364,6 +369,16 @@ function onKeyUp(e) {
 document.addEventListener('keydown', onKeyDown, true);
 document.addEventListener('keyup',   onKeyUp,   true);
 
+/* ───────── 焦点环闸门 ─────────
+   只有真正按下 Tab 才允许显示焦点环;任何指针操作立刻关闭。
+   这样 Esc 切换浏览器输入模态时不会再把按钮的框点亮。 */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') document.body.classList.add('kbd');
+}, true);
+document.addEventListener('pointerdown', () => {
+  document.body.classList.remove('kbd');
+}, true);
+
 overlay.addEventListener('cancel', (e) => e.preventDefault());   // 双保险
 
 /* ───────── 开 / 关 ───────── */
@@ -377,7 +392,15 @@ function open() {
   fill.style.transform  = 'scaleX(1)';
   $('left').textContent = remainText(duration);
   if (!overlay.open) overlay.showModal();
-  overlay.focus();                       // FIX②: 焦点留在 dialog,不落到跳过按钮
+
+  // 焦点留在 dialog,不落到跳过按钮。
+  // Chrome 对 <dialog autofocus> 自身的处理不完全可靠,且 autofocus 可能在
+  // 下一帧才生效,因此再补一次帧后校正。
+  overlay.focus();
+  requestAnimationFrame(() => {
+    if (overlay.open && document.activeElement !== overlay) overlay.focus();
+  });
+
   countRaf = requestAnimationFrame(countTick);
 }
 
