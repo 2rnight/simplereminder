@@ -15,15 +15,12 @@
     --amber:      #e8a33d;
     --amber-soft: #f3bf72;
 
-    /* ---- 纯色背景(非渐变)---- */
-    --bg-h: 32;
-    --bg-s: 38%;
-    --bg-l: 8%;
+    --bg-h: 32;  --bg-s: 38%;  --bg-l: 8%;      /* 纯色背景 */
 
-    /* ---- 可调参数 ---- */
     --fade-in:    300ms;
-    --fade-out:   200ms;
+    --fade-out:   260ms;
     --title-size: 52px;
+    --sub-size:   24px;
     --bar-w:      38vw;
     --ease:       cubic-bezier(.22,.61,.36,1);
   }
@@ -82,93 +79,88 @@
     width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh;
     margin: 0; padding: 0; border: 0; overflow: hidden;
     color: #fff;
-    background: hsl(var(--bg-h) var(--bg-s) var(--bg-l));   /* 纯色 */
+    background: hsl(var(--bg-h) var(--bg-s) var(--bg-l));
   }
+  dialog#overlay:focus { outline: none; }          /* FIX②: dialog 持有焦点,不画环 */
   dialog#overlay::backdrop { background: #000; }
 
   @keyframes ov-in      { from { opacity: 0 } to { opacity: 1 } }
-  @keyframes ov-out     { to   { opacity: 0 } }
+  @keyframes ov-out     { from { opacity: 1 } to { opacity: 0 } }
   @keyframes content-in { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
 
   dialog#overlay[open]           { animation: ov-in var(--fade-in) var(--ease) both; }
   dialog#overlay[open]::backdrop { animation: ov-in var(--fade-in) var(--ease) both; }
-  dialog#overlay.closing         { animation: ov-out var(--fade-out) ease both; }
+
+  /* FIX③: 淡出必须同时作用于 dialog 和 ::backdrop。
+     原来只给了 dialog —— backdrop 是纯黑且在后面,dialog 一淡出就
+     露出黑底,close() 再瞬间全消失,观感等于没有淡出。 */
+  dialog#overlay.closing           { animation: ov-out var(--fade-out) ease both; }
+  dialog#overlay.closing::backdrop { animation: ov-out var(--fade-out) ease both; }
 
   .stage {
     height: 100%; display: flex; flex-direction: column; align-items: center;
-    padding: 27vh 24px 9vh; text-align: center;
+    padding: 24vh 24px 9vh; text-align: center;
     animation: content-in calc(var(--fade-in) + 140ms) var(--ease) both;
     animation-delay: 60ms;
   }
 
-  /* —— 标题:Stretchly 风格的细字重 + 大字号 —— */
-  .title {
-    font-size: var(--title-size); font-weight: 300;
-    letter-spacing: .02em; line-height: 1.25; margin: 0;
-    color: rgba(255,255,255,.95);
-  }
+  .title { font-size: var(--title-size); font-weight: 300; letter-spacing: .02em;
+           line-height: 1.25; margin: 0; color: rgba(255,255,255,.95); }
 
-  /* —— 细长进度条(取代大倒计时数字)—— */
-  .bar {
-    width: var(--bar-w); max-width: 560px; height: 7px; border-radius: 4px;
-    margin-top: 11vh; overflow: hidden;
-    background: rgba(255,255,255,.16);
-  }
-  .bar > i {
-    display: block; height: 100%; border-radius: 4px;
-    background: rgba(255,255,255,.88);
-    transform-origin: left center;
-    transform: scaleX(1);              /* 随时间递减 */
-  }
+  /* 副文案(Stretchly 的 body 位) */
+  .sub   { font-size: var(--sub-size); font-weight: 300; letter-spacing: .04em;
+           line-height: 1.5; margin: 4.5vh 0 0; color: rgba(255,255,255,.62); }
+  .sub.off { display: none; }
 
-  /* —— 条下方的剩余时间说明 —— */
-  .left {
-    margin-top: 17px; font-size: 16px; font-weight: 300;
-    letter-spacing: .03em; color: rgba(255,255,255,.58);
-    font-variant-numeric: tabular-nums;
-  }
+  /* 细长进度条 */
+  .bar { width: var(--bar-w); max-width: 560px; height: 7px; border-radius: 4px;
+         margin-top: 9vh; overflow: hidden; background: rgba(255,255,255,.16); }
+  .bar > i { display: block; height: 100%; border-radius: 4px;
+             background: rgba(255,255,255,.88);
+             transform-origin: left center; transform: scaleX(1); }
 
-  /* —— 跳过:无边框文字链接 + 小圆进度环(仿 Stretchly 底部操作)—— */
-  .skip {
-    margin-top: auto; display: inline-flex; align-items: center; gap: 13px;
-    font: inherit; font-size: 17px; font-weight: 300; letter-spacing: .03em;
-    color: rgba(255,255,255,.52);
-    background: none; border: 0; padding: 6px 4px; cursor: pointer;
-    transition: color .2s; -webkit-tap-highlight-color: transparent; user-select: none;
-  }
+  .left { margin-top: 17px; font-size: 16px; font-weight: 300; letter-spacing: .03em;
+          color: rgba(255,255,255,.58); font-variant-numeric: tabular-nums; }
+
+  /* 跳过:无边框文字 + 小圆进度环 */
+  .skip { margin-top: auto; display: inline-flex; align-items: center; gap: 13px;
+          font: inherit; font-size: 17px; font-weight: 300; letter-spacing: .03em;
+          color: rgba(255,255,255,.52);
+          background: none; border: 0; padding: 6px 10px; cursor: pointer;
+          transition: color .2s; -webkit-tap-highlight-color: transparent; user-select: none; }
   .skip:hover   { color: rgba(255,255,255,.82); }
   .skip.holding { color: var(--amber-soft); }
+  .skip:focus          { outline: none; }
+  .skip:focus-visible  { outline: 2px solid var(--amber); outline-offset: 8px; border-radius: 22px; }
 
   .skip svg { width: 26px; height: 26px; overflow: visible; display: block; }
   .skip .trk { fill: none; stroke: currentColor; stroke-width: 1.4; opacity: .42; }
-  .skip .rng {
-    fill: none; stroke: var(--amber); stroke-width: 2; stroke-linecap: round;
-    stroke-dasharray: 100; stroke-dashoffset: 100;
-    transform: rotate(-90deg); transform-origin: 13px 13px;   /* 圆形,旋转安全 */
-  }
+  .skip .rng { fill: none; stroke: var(--amber); stroke-width: 2; stroke-linecap: round;
+               stroke-dasharray: 100; stroke-dashoffset: 100;
+               transform: rotate(-90deg); transform-origin: 13px 13px; }
 
   @media (prefers-reduced-motion: reduce) {
     dialog#overlay[open], dialog#overlay[open]::backdrop,
-    dialog#overlay.closing, .stage { animation: none !important; }
+    dialog#overlay.closing, dialog#overlay.closing::backdrop,
+    .stage { animation: none !important; }
   }
 
   /* ============================================================
      DEV PANEL(不属于产品 · 按 D 隐藏)
-     必须置于 dialog 内部,否则模态期间页面 inert 调不动
      ============================================================ */
   .dev { position: fixed; right: 18px; bottom: 18px; width: 254px;
          background: rgba(0,0,0,.5); backdrop-filter: blur(18px);
          border: 1px solid rgba(255,255,255,.12); border-radius: 13px;
          padding: 14px 15px 13px; font-size: 11.5px; color: rgba(255,255,255,.62);
-         display: grid; gap: 10px; z-index: 10; text-align: left; }
+         display: grid; gap: 9px; z-index: 10; text-align: left; }
   .dev.hidden { display: none; }
   .dev h4 { margin: 0 0 2px; font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
             color: rgba(255,255,255,.32); font-weight: 600; }
-  .dev label { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; align-items: center; }
+  .dev label { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
   .dev label > b { font-weight: 400; }
   .dev label > var { font-style: normal; font-variant-numeric: tabular-nums;
                      color: var(--amber); font-size: 11px; }
-  .dev input[type=range] { grid-column: 1/-1; width: 100%; accent-color: var(--amber); height: 15px; margin: 0; }
+  .dev input[type=range] { grid-column: 1/-1; width: 100%; accent-color: var(--amber); height: 14px; margin: 0; }
   .dev .row { display: flex; gap: 7px; }
   .dev button { flex: 1; font: inherit; font-size: 11.5px; cursor: pointer; padding: 6px 0;
                 color: rgba(255,255,255,.78); background: rgba(255,255,255,.08);
@@ -211,11 +203,14 @@
 </div>
 
 
-<!-- ═══════════ 产品本体 ═══════════ -->
-<dialog id="overlay" aria-label="休息提醒">
+<!-- ═══════════ 产品本体 ═══════════
+     FIX②: tabindex=-1 + autofocus 让 dialog 自己持有初始焦点,
+     跳过按钮就不会在打开瞬间被 showModal() 自动聚焦而画出焦点环 -->
+<dialog id="overlay" aria-label="休息提醒" tabindex="-1" autofocus>
   <div class="stage">
 
     <h1 class="title">站起来,走两步</h1>
+    <p class="sub" id="sub">让腰背松一松</p>
 
     <div class="bar"><i id="fill"></i></div>
     <div class="left" id="left">还有 20 秒</div>
@@ -236,25 +231,25 @@
 
     <label><b>背景亮度 L</b><var id="vL">8.0%</var>
       <input type="range" id="rL" min="3" max="45" step="0.5" value="8"></label>
-
     <label><b>背景色相 H</b><var id="vH">32</var>
       <input type="range" id="rH" min="0" max="360" step="1" value="32"></label>
-
     <label><b>背景饱和 S</b><var id="vS">38%</var>
       <input type="range" id="rS" min="0" max="60" step="1" value="38"></label>
 
     <label><b>标题字号</b><var id="vT">52 px</var>
       <input type="range" id="rT" min="28" max="86" step="1" value="52"></label>
-
+    <label><b>副文案字号</b><var id="vSu">24 px</var>
+      <input type="range" id="rSu" min="14" max="44" step="1" value="24"></label>
     <label><b>进度条宽</b><var id="vW">38 vw</var>
       <input type="range" id="rW" min="18" max="70" step="1" value="38"></label>
 
     <label><b>渐暗时长</b><var id="vIn">300 ms</var>
       <input type="range" id="rIn" min="0" max="1200" step="25" value="300"></label>
+    <label><b>淡出时长</b><var id="vOut">260 ms</var>
+      <input type="range" id="rOut" min="0" max="1200" step="20" value="260"></label>
 
     <label><b>休息时长</b><var id="vD">20 s</var>
       <input type="range" id="rD" min="5" max="300" step="5" value="20"></label>
-
     <label><b>长按时长</b><var id="vHo">1000 ms</var>
       <input type="range" id="rHo" min="300" max="2500" step="50" value="1000"></label>
 
@@ -264,6 +259,7 @@
       <button id="pMid">Stretchly 调</button>
     </div>
     <div class="row">
+      <button id="bSub" class="on">副文案</button>
       <button id="bLoop" class="on">循环</button>
       <button id="bRe">重放</button>
     </div>
@@ -283,11 +279,11 @@ const fill    = $('fill');
 
 const RING = 100;
 
-let duration  = 20;        // 秒
+let duration  = 20;
 let holdMs    = 1000;
 let loop      = true;
 
-let endsAt    = 0;         // ⭐ 绝对时间戳,不存剩余秒数
+let endsAt    = 0;          // ⭐ 绝对时间戳
 let countRaf  = null;
 let holdRaf   = null;
 let holdStart = 0;
@@ -304,30 +300,25 @@ function remainText(sec) {
   return `还有 ${sec} 秒`;
 }
 
-/* ───────── 倒计时:进度条 + 文案(绝对时间驱动)───────── */
+/* ───────── 倒计时:进度条 + 文案 ───────── */
 function countTick() {
   const leftMs = endsAt - Date.now();
-  const total  = duration * 1000;
-  fill.style.transform = `scaleX(${Math.max(0, leftMs / total).toFixed(4)})`;
+  fill.style.transform  = `scaleX(${Math.max(0, leftMs / (duration * 1000)).toFixed(4)})`;
   $('left').textContent = remainText(leftMs / 1000);
   if (leftMs <= 0) { countRaf = null; finish('done'); return; }
   countRaf = requestAnimationFrame(countTick);
 }
-function stopCount() {
-  if (countRaf !== null) cancelAnimationFrame(countRaf);
-  countRaf = null;
-}
+function stopCount() { if (countRaf !== null) cancelAnimationFrame(countRaf); countRaf = null; }
 
-/* ───────── 长按跳过 ─────────
-   rAF + performance.now() 驱动,不用 CSS transition
-   (类名「移除→重加」之间无 reflow,transition 会从中途续跑 → 第二次变快) */
+/* ───────── 长按跳过 ───────── */
 function beginHold() {
-  if (holdRaf !== null || finishing) return;
+  if (holdRaf !== null || finishing || !overlay.open) return;
   holdStart = performance.now();
   skip.classList.add('holding');
   holdRaf = requestAnimationFrame(holdTick);
 }
 function holdTick(now) {
+  if (!overlay.open) { holdRaf = null; releaseHold(); return; }   // 防御
   const p = Math.min(1, (now - holdStart) / holdMs);
   ring.style.strokeDashoffset = (RING * (1 - p)).toFixed(2);
   if (p >= 1) { holdRaf = null; finish('skipped'); return; }
@@ -345,34 +336,58 @@ skip.addEventListener('pointerup',     releaseHold);
 skip.addEventListener('pointerleave',  releaseHold);
 skip.addEventListener('pointercancel', releaseHold);
 
-addEventListener('keydown', (e) => {
-  if (!overlay.open || e.key !== 'Escape' || e.repeat) return;
-  beginHold();
-});
-addEventListener('keyup', (e) => { if (e.key === 'Escape') releaseHold(); });
+/* ───────── 键盘通路:按住 Esc ─────────
+   FIX①: 原来只在 dialog 的 cancel 事件里 preventDefault,挡不住
+   Chrome 的 CloseWatcher —— 长按 Esc 产生连续 keydown,每次都是一个
+   close request,无用户激活时 Chrome 会强制关闭 dialog 防止用户被困。
+   dialog 关了但 holdTick 还在跑,走满才 finish → 表现为「进度到一半画面就没了」。
+   改为在捕获阶段 preventDefault,close request 根本不会产生。
 
-/* ⭐ 拦截 Esc 默认关闭 */
-overlay.addEventListener('cancel', (e) => e.preventDefault());
+   同时用 heldKey 代替 e.repeat:部分平台(X11)的自动重复是
+   keydown/keyup 成对发送,用 60ms 宽限窗吸收,避免进度反复归零。  */
+let heldKey = null, releaseTimer = null;
+
+function onKeyDown(e) {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();  e.stopPropagation();     // ← 关键
+  if (!overlay.open) return;
+  clearTimeout(releaseTimer); releaseTimer = null;
+  if (heldKey === 'Escape') return;             // 自动重复 → 保持进度
+  heldKey = 'Escape';
+  beginHold();
+}
+function onKeyUp(e) {
+  if (e.key !== 'Escape' || heldKey !== 'Escape') return;
+  clearTimeout(releaseTimer);
+  releaseTimer = setTimeout(() => { heldKey = null; releaseHold(); }, 60);
+}
+document.addEventListener('keydown', onKeyDown, true);
+document.addEventListener('keyup',   onKeyUp,   true);
+
+overlay.addEventListener('cancel', (e) => e.preventDefault());   // 双保险
 
 /* ───────── 开 / 关 ───────── */
 function open() {
-  clearTimeout(relaunch);
+  clearTimeout(relaunch); clearTimeout(releaseTimer);
+  heldKey = null; releaseTimer = null;
   stopCount(); releaseHold();
   finishing = false;
   overlay.classList.remove('closing');
   endsAt = Date.now() + duration * 1000;
-  fill.style.transform = 'scaleX(1)';
+  fill.style.transform  = 'scaleX(1)';
   $('left').textContent = remainText(duration);
   if (!overlay.open) overlay.showModal();
+  overlay.focus();                       // FIX②: 焦点留在 dialog,不落到跳过按钮
   countRaf = requestAnimationFrame(countTick);
 }
 
 function finish(reason) {
-  if (finishing) return;               // 重入保护
+  if (finishing) return;                 // 重入保护
   finishing = true;
   stopCount(); releaseHold();
+  heldKey = null; clearTimeout(releaseTimer);
   overlay.classList.add('closing');
-  const out = parseInt(getComputedStyle(root).getPropertyValue('--fade-out')) || 200;
+  const out = parseFloat(getComputedStyle(root).getPropertyValue('--fade-out')) || 0;
   setTimeout(() => {
     overlay.close();
     overlay.classList.remove('closing');
@@ -387,24 +402,27 @@ $('start').addEventListener('click', open);
 /* ══════════ DEV PANEL(不属于产品)══════════ */
 const bind = (s, o, fn) => $(s).addEventListener('input', (e) => fn(parseFloat(e.target.value), $(o)));
 
-bind('rL', 'vL', (v,o) => { root.style.setProperty('--bg-l', v + '%');  o.textContent = v.toFixed(1) + '%'; });
-bind('rH', 'vH', (v,o) => { root.style.setProperty('--bg-h', v);        o.textContent = v; });
-bind('rS', 'vS', (v,o) => { root.style.setProperty('--bg-s', v + '%');  o.textContent = v + '%'; });
-bind('rT', 'vT', (v,o) => { root.style.setProperty('--title-size', v + 'px'); o.textContent = v + ' px'; });
-bind('rW', 'vW', (v,o) => { root.style.setProperty('--bar-w', v + 'vw'); o.textContent = v + ' vw'; });
-bind('rIn','vIn',(v,o) => { root.style.setProperty('--fade-in', v + 'ms'); o.textContent = v + ' ms'; });
-bind('rD', 'vD', (v,o) => { duration = v; o.textContent = v + ' s'; });
-bind('rHo','vHo',(v,o) => { holdMs   = v; o.textContent = v + ' ms'; });
+bind('rL',  'vL',  (v,o) => { root.style.setProperty('--bg-l', v + '%'); o.textContent = v.toFixed(1) + '%'; });
+bind('rH',  'vH',  (v,o) => { root.style.setProperty('--bg-h', v);       o.textContent = v; });
+bind('rS',  'vS',  (v,o) => { root.style.setProperty('--bg-s', v + '%'); o.textContent = v + '%'; });
+bind('rT',  'vT',  (v,o) => { root.style.setProperty('--title-size', v + 'px'); o.textContent = v + ' px'; });
+bind('rSu', 'vSu', (v,o) => { root.style.setProperty('--sub-size',   v + 'px'); o.textContent = v + ' px'; });
+bind('rW',  'vW',  (v,o) => { root.style.setProperty('--bar-w', v + 'vw');      o.textContent = v + ' vw'; });
+bind('rIn', 'vIn', (v,o) => { root.style.setProperty('--fade-in',  v + 'ms');   o.textContent = v + ' ms'; });
+bind('rOut','vOut',(v,o) => { root.style.setProperty('--fade-out', v + 'ms');   o.textContent = v + ' ms'; });
+bind('rD',  'vD',  (v,o) => { duration = v; o.textContent = v + ' s'; });
+bind('rHo', 'vHo', (v,o) => { holdMs   = v; o.textContent = v + ' ms'; });
 
 function preset(h, s, l) {
   $('rH').value = h; $('rS').value = s; $('rL').value = l;
   ['rH','rS','rL'].forEach(id => $(id).dispatchEvent(new Event('input')));
 }
-$('pDark').addEventListener('click', () => preset(32, 38, 8));    // 暗琥珀
-$('pMid') .addEventListener('click', () => preset(28, 22, 33));   // Stretchly 中间调
+$('pDark').addEventListener('click', () => preset(32, 38, 8));
+$('pMid') .addEventListener('click', () => preset(28, 22, 33));
 
+$('bSub') .addEventListener('click', (e) => $('sub').classList.toggle('off', !e.target.classList.toggle('on')));
 $('bLoop').addEventListener('click', (e) => { loop = e.target.classList.toggle('on'); });
-$('bRe').addEventListener('click', open);
+$('bRe')  .addEventListener('click', open);
 addEventListener('keydown', (e) => { if (e.key === 'd' || e.key === 'D') $('dev').classList.toggle('hidden'); });
 
 addEventListener('load', () => setTimeout(open, 450));
