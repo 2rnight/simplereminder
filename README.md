@@ -8,8 +8,10 @@
 
 ## 当前状态
 
-**可以装进 Chrome 跑了** —— 遮罩链路已打通(实现顺序 7 步中的第 1、2 步完成)。
-调度器还没做,所以目前只能手动触发:**点工具栏图标 = 立即休息一次。**
+**它现在真的会自己响了。** 实现顺序 7 步中的第 1、2、3 步完成 ——
+遮罩链路 + 调度器(单一 alarm + 幂等 `reconcile()` + 完整状态机)。
+
+还没有界面(popup 是第 6 步),所以改参数要走控制台,见下面「调试」。
 
 | 文档 | 内容 |
 |---|---|
@@ -60,6 +62,39 @@ Chrome 只在页面**加载时**注入 content script,安装和更新都不算�
 自动给已打开的标签页补注入,但如果你是直接覆盖文件后手动重载扩展,
 偶尔还是需要刷一下页面。
 
+### 调试
+
+还没有 popup,改参数和看状态都在 **service worker 控制台**:
+`chrome://extensions` → SimpleReminder 卡片上的「Service Worker」链接。
+
+```js
+// 间隔改 1 分钟、预告 5 秒,方便一分钟内看完整个周期
+// (改完立刻生效 —— settings 变更会触发 reconcile 重算)
+chrome.storage.sync.get('settings', ({settings}) =>
+  chrome.storage.sync.set({ settings: { ...settings, intervalMinutes: 1, preNoticeSeconds: 5 } }));
+
+// 看当前状态机
+chrome.storage.local.get('runtime', console.log);
+
+// 看唯一的那个闹钟
+chrome.alarms.getAll(console.log);
+
+// 看埋点(按条目记跳过率,用来当调参助手)
+chrome.storage.local.get('stats', console.log);
+```
+
+> 预告相位目前**没有界面**(第 4 步才做),所以你会看到:到点后静默 5~8 秒,
+> 然后遮罩盖上。这是对的,不是卡了。
+
+### 测试
+
+```bash
+node test/run.mjs
+```
+
+零依赖,不需要 `npm install`。91 条断言,覆盖状态机、补齐逻辑、
+睡眠唤醒、延迟计数、并发去重、重复注入。改调度逻辑前先跑一遍。
+
 ### 想单独调这一屏的视觉
 
 `demo/break-stand.html` 是不接任何扩展逻辑的单文件原型,浏览器直接打开即可,
@@ -84,7 +119,7 @@ Chrome 只在页面**加载时**注入 content script,安装和更新都不算�
 
 ## 下一步
 
-**第 3 步:`background.js` 的 `reconcile()` + 单一 `next-wake` alarm。**
+**第 4 步:预告条。** 通栏贴顶的 `popover`,空格延迟,输入中自动延迟。
 
-现在的 background 是个最小可测版本 —— 会抽内容、会埋点、会按正常间隔重排,
-但**没有闹钟**,所以不会自己响。接上调度器之后,它才真的成为一个节拍器。
+状态机里的 `prenotice` 相位和 `POSTPONE` 消息已经就绪,第 4 步只剩 UI ——
+把那 8 秒从「静默」变成「看得见」。

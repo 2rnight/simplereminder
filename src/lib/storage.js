@@ -47,12 +47,13 @@ export const DEFAULT_SETTINGS = {
  *
  * @typedef {Object} RuntimeState
  * @property {'idle'|'prenotice'|'breaking'} phase
- * @property {number|null} nextFireAt
+ * @property {number|null} nextFireAt       ⭐ 绝对时间戳 —— 预告该开始的时刻
+ * @property {number|null} prenoticeEndsAt  ⭐ 绝对时间戳 —— 预告结束 = 休息开始
  * @property {number|null} breakStartedAt   ⭐ 绝对时间戳(进度条算分母用)
  * @property {number|null} breakEndsAt      ⭐ 绝对时间戳 —— 绝不存"剩余秒数"
  * @property {string|null} currentIdeaId    ⭐ background 抽,全窗口共享
  * @property {number} postponeCount
- * @property {number|null} pausedUntil
+ * @property {number|null} pausedUntil      null = 未暂停;PAUSE_FOREVER = 直到手动恢复
  * @property {string[]} ideaBag             洗牌袋剩余队列
  */
 
@@ -60,6 +61,7 @@ export const DEFAULT_SETTINGS = {
 export const DEFAULT_RUNTIME = {
   phase: 'idle',
   nextFireAt: null,
+  prenoticeEndsAt: null,
   breakStartedAt: null,
   breakEndsAt: null,
   currentIdeaId: null,

@@ -382,12 +382,26 @@ docs/
 1. ✅ **`break.html` 单独成页** —— 不接任何扩展逻辑,浏览器直接打开调视觉
    (暗度 / 排版 / 进度条 / 渐暗曲线 / 长按进度环)。原型见 `demo/break-stand.html`
 2. ✅ **content script**:`<dialog>` + iframe 挂载、`showModal`、Top Layer 抢回、自愈 observer
-3. ⬜ **`background.js`**:`reconcile()` + 单 alarm + 状态机
-   *(当前只有最小可测版:点图标立即休息 + 结束上报 + 洗牌袋 + 埋点,没有 alarm)*
+3. ✅ **`background.js`**:`reconcile()` + 单 alarm + 状态机
+   调度核心抽成纯函数 `lib/scheduler.js`,回归测试见 `test/`(`node test/run.mjs`)
 4. ⬜ 预告条 `popover` + 空格延迟 + 输入中自动延迟
+   *(状态机里的 `prenotice` 相位与 `POSTPONE` 消息已就绪,第 4 步只剩 UI)*
 5. ⬜ idle 检测 + 暂停 + badge
 6. ⬜ popup
 7. ⬜ 埋点展示(记录已在第 2 步随手做掉)
+
+### 第 3 步落地时确认的事实
+
+| 事实 | 影响 |
+|---|---|
+| ⭐ **alarm 最小 30 秒,而预告 8 秒、休息 20 秒都在这之下** | 闹钟根本管不了短过渡。改为三层:①页面侧倒计时读同一批绝对时间戳,**精确**;②单一 `next-wake` 闹钟保证**最终一定会醒来**;③SW 里 `setTimeout` 作尽力而为的 fast path。只有①②是正确性依赖 |
+| ⭐ **时长必须从 `now` 起算,不能从"计划时刻"起算** | 闹钟迟到 40 秒时,若用 `nextFireAt + 8s` 算预告结束,用户只会看到预告条闪 1 秒就黑屏。休息同理 |
+| ⭐ **过渡迟到太久要重置周期,不能补放** | 否则「开完 1 小时会坐下,还没碰键盘屏幕啪一下黑了」—— PRODUCT 点名的最经典差评场景。阈值 `STALE_MS = 2min`,第 5 步接 `chrome.idle` 后会有更准的判断 |
+| ⭐ **休息结束后 `nextFireAt` 要用 `now` 而非 `breakEndsAt`** | 否则休息期间电脑睡了三小时,醒来会立刻再响一次 |
+| ⭐ **所有状态变更必须串行化** | 闹钟、消息、settings 变更可能同时到达,每条都是「读→算→写」。不串行化会丢更新:两边都读到 `phase='breaking'`,各自算完各自写,后写的覆盖先写的 |
+| ⭐ **`storage.onChanged` 只能听 `sync`** | 听 `local` 会和自己写 runtime 形成回声循环 |
+| **`postponeCount` 在休息结束时归零,不是预告开始时** | 否则延迟后重新预告,角标永远显示不出 `×2` |
+| **`currentIdeaId` 跨延迟保留** | 预告已经剧透过「这次要干嘛」,延迟 5 分钟后换成另一件事会显得随机 |
 
 ### 第 2 步落地时确认的事实
 
