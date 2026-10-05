@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SimpleReminder · popup 预览</title>
+<link rel="stylesheet" href="../src/popup/popup.css">
+<style>
+  /* 预览脚手架 —— 不属于产品 */
+  html { background: #15120e; }
+  body { width: auto !important; max-width: none !important; padding: 0 !important;
+         min-height: 100vh; display: grid; place-items: center; gap: 22px;
+         grid-auto-flow: row; align-content: center; }
+  .frame { width: 276px; padding: 16px 16px 14px; background: hsl(32 22% 11%);
+           border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.6);
+           outline: 1px solid rgba(255,255,255,.07); }
+  .note { font: 12px/1.7 -apple-system, "PingFang SC", sans-serif;
+          color: rgba(255,255,255,.4); text-align: center; max-width: 420px; }
+  .note b { color: rgba(255,255,255,.72); font-weight: 500; }
+  .note code { color: #e8a33d; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+
+<p class="note"><b>popup 预览</b> —— 这是真的 <code>popup.js</code> 跑在假的 chrome API 上,
+不是截图。倒计时会走,勾选 / 间隔 / 暂停都能点。<br>
+状态每 30 秒自动在「等待 → 马上休息 → 休息中」之间循环一遍给你看。</p>
+
+<div class="frame" id="frame"></div>
+
+<script type="module">
+/* ── 假 chrome API ─────────────────────────────────────────────────────── */
+const mem = {
+  sync: { settings: null },                 // 走 storage.js 的默认值
+  local: {
+    runtime: {
+      phase: 'idle',
+      nextFireAt: Date.now() + 20 * 60_000,
+      prenoticeEndsAt: null, breakStartedAt: null, breakEndsAt: null,
+      currentIdeaId: null, postponeCount: 0, pausedUntil: null, ideaBag: [],
+    },
+  },
+};
+const listeners = [];
+const area = (n) => ({
+  async get(k) { return (k in mem[n] && mem[n][k] != null) ? { [k]: mem[n][k] } : {}; },
+  async set(o) {
+    const ch = {};
+    for (const [k, v] of Object.entries(o)) { ch[k] = { oldValue: mem[n][k], newValue: v }; mem[n][k] = v; }
+    listeners.forEach((f) => f(ch, n));
+  },
+});
+window.chrome = {
+  storage: { sync: area('sync'), local: area('local'),
+             onChanged: { addListener: (f) => listeners.push(f) } },
+  runtime: {
+    id: 'preview',
+    async sendMessage(msg) {                 // 模拟 background 的状态迁移
+      const rt = { ...mem.local.runtime };
+      const now = Date.now();
+      if (msg.type === 'START_BREAK') {
+        Object.assign(rt, { phase: 'breaking', pausedUntil: null, currentIdeaId: 'stand',
+                            breakStartedAt: now, breakEndsAt: now + 20_000 });
+      } else if (msg.type === 'SET_PAUSE') {
+        Object.assign(rt, { pausedUntil: msg.until,
+                            phase: 'idle', prenoticeEndsAt: null, breakEndsAt: null,
+                            nextFireAt: msg.until === null ? now + 20 * 60_000 : null });
+      }
+      await chrome.storage.local.set({ runtime: rt });
+    },
+  },
+};
+window.close = () => {};                     // popup 里点「立即休息」会调
+
+/* ── 把真的 popup.html 的 body 搬进来,避免两份标记漂移 ────────────────── */
+const html = await (await fetch('../src/popup/popup.html')).text();
+const doc = new DOMParser().parseFromString(html, 'text/html');
+document.getElementById('frame').innerHTML = doc.body.innerHTML;   // script 标签不会执行
+await import('../src/popup/popup.js');
+
+/* ── 自动演示各个状态 ─────────────────────────────────────────────────── */
+let step = 0;
+setInterval(async () => {
+  const rt = { ...mem.local.runtime };
+  if (rt.pausedUntil) return;                // 用户手动暂停了就别打扰
+  const now = Date.now();
+  step = (step + 1) % 3;
+  if (step === 0) Object.assign(rt, { phase: 'idle', nextFireAt: now + 20 * 60_000,
+                                      prenoticeEndsAt: null, breakEndsAt: null });
+  if (step === 1) Object.assign(rt, { phase: 'prenotice', prenoticeEndsAt: now + 8_000 });
+  if (step === 2) Object.assign(rt, { phase: 'breaking', breakStartedAt: now,
+                                      breakEndsAt: now + 20_000, currentIdeaId: 'stand' });
+  await chrome.storage.local.set({ runtime: rt });
+}, 30_000);
+</script>
+</body>
+</html>

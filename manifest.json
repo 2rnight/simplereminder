@@ -29,6 +29,7 @@
   ],
 
   "action": {
-    "default_title": "SimpleReminder · 点击立即休息(v0.1 临时入口)"
+    "default_title": "SimpleReminder",
+    "default_popup": "src/popup/popup.html"
   }
 }

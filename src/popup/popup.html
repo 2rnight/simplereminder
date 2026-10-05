@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SimpleReminder</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+<!-- 状态区:这是 popup 存在的首要理由 ——
+     「这扩展还活着吗、下次什么时候」必须一眼看到,不用点任何东西 -->
+<header class="status" id="status">
+  <div class="status-main" id="statusMain">下次休息 --:--</div>
+  <div class="status-sub"  id="statusSub">读取中…</div>
+  <button class="resume" id="resume" type="button" hidden>恢复</button>
+</header>
+
+<!-- 内容勾选 -->
+<ul class="ideas" id="ideas"></ul>
+<p class="hint" id="ideaHint" hidden>至少保留一条。想完全停用请用「暂停」。</p>
+
+<!-- 参数 -->
+<div class="fields">
+  <label>
+    <span>间隔</span>
+    <input type="number" id="interval" min="1" max="240" step="1" inputmode="numeric">
+    <span class="unit">分</span>
+  </label>
+  <label>
+    <span>时长</span>
+    <input type="number" id="duration" min="5" max="600" step="5" inputmode="numeric">
+    <span class="unit">秒</span>
+  </label>
+</div>
+<p class="hint" id="preview" hidden></p>
+
+<!-- 动作 -->
+<div class="actions">
+  <button class="primary" id="now" type="button">立即休息</button>
+  <div class="pause-wrap">
+    <button class="ghost" id="pauseBtn" type="button" aria-haspopup="true" aria-expanded="false">
+      暂停 <svg viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    </button>
+    <div class="menu" id="pauseMenu" hidden>
+      <button type="button" data-min="30">30 分钟</button>
+      <button type="button" data-min="60">1 小时</button>
+      <button type="button" data-today="1">今天不再提醒</button>
+      <button type="button" data-forever="1">直到手动恢复</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="popup.js"></script>
+</body>
+</html>

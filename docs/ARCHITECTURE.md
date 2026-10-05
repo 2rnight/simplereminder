@@ -385,10 +385,23 @@ docs/
 3. ✅ **`background.js`**:`reconcile()` + 单 alarm + 状态机
    调度核心抽成纯函数 `lib/scheduler.js`,回归测试见 `test/`(`node test/run.mjs`)
 4. ⬜ 预告条 `popover` + 空格延迟 + 输入中自动延迟
-   *(状态机里的 `prenotice` 相位与 `POSTPONE` 消息已就绪,第 4 步只剩 UI)*
+   *(状态机里的 `prenotice` 相位与 `POSTPONE` 消息已就绪,只剩 UI)*
 5. ⬜ idle 检测 + 暂停 + badge
-6. ⬜ popup
+6. ✅ **popup** —— **提前到第 3 步之后做**。原因见下
 7. ⬜ 埋点展示(记录已在第 2 步随手做掉)
+
+### 顺序调整:popup 从第 6 步提前到第 3 步之后
+
+第 3 步做完后出现一个很实际的问题:**调度器没有任何界面可以验证。**
+要改间隔得去 service worker 控制台粘 JS,要看状态得手敲
+`chrome.storage.local.get('runtime', console.log)`。
+
+这不只是不方便 —— 它让「它到底有没有在工作」无法回答,而这恰恰是
+这个产品**唯一**要回答的问题(参见商店差评:「点图标什么都没有」)。
+一个带实时倒计时的 popup 就是答案本身,所以提前。
+
+代价:预告条往后挪一轮。可接受 —— 预告条依赖的 `prenotice` 相位
+和 `POSTPONE` 消息在第 3 步已经就绪,纯粹只剩 UI。
 
 ### 第 3 步落地时确认的事实
 

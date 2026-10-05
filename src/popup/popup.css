@@ -1,0 +1,176 @@
+/* ============================================================================
+   SimpleReminder · popup
+   配色沿用休息屏:深色低饱和底 + 琥珀强调色,保持同一个产品的质感。
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg:       hsl(32 22% 11%);
+  --bg-soft:  hsl(32 16% 16%);
+  --line:     rgba(255,255,255,.10);
+  --fg:       rgba(255,255,255,.92);
+  --fg-dim:   rgba(255,255,255,.55);
+  --fg-faint: rgba(255,255,255,.34);
+  --amber:    #e8a33d;
+}
+
+html { color-scheme: dark; }
+
+body {
+  width: 276px;
+  margin: 0;
+  padding: 16px 16px 14px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+               "Noto Sans SC", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ───────────────────────────── 状态区 ──────────────────────────────────── */
+
+.status { position: relative; margin-bottom: 15px; }
+
+.status-main {
+  font-size: 19px;
+  font-weight: 300;
+  letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;   /* 秒数跳动时宽度不抖 */
+}
+.status-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.status.is-paused  .status-main { color: var(--fg-faint); }
+.status.is-active  .status-main { color: var(--amber); }
+
+.resume {
+  position: absolute; right: 0; top: 2px;
+  font: inherit; font-size: 12px;
+  color: var(--amber);
+  background: none; border: 1px solid rgba(232,163,61,.4);
+  border-radius: 6px; padding: 4px 10px; cursor: pointer;
+}
+.resume:hover { background: rgba(232,163,61,.12); }
+
+/* ─────────────────────────── 内容勾选 ─────────────────────────────────── */
+
+.ideas { list-style: none; margin: 0 0 10px; padding: 0; }
+
+.ideas button {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%;
+  font: inherit; text-align: left;
+  color: var(--fg-dim);
+  background: none; border: 0;
+  padding: 7px 6px; margin: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ideas button:hover { background: rgba(255,255,255,.05); }
+.ideas button[aria-pressed="true"] { color: var(--fg); }
+
+.ideas .emoji { font-size: 14px; width: 17px; text-align: center; filter: saturate(.85); }
+.ideas .label { flex: 1; min-width: 0; }
+
+/* 勾选圆点:实心 = 参与随机 */
+.ideas .dot {
+  width: 13px; height: 13px; flex: none;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,.28);
+}
+.ideas button[aria-pressed="true"] .dot {
+  border-color: var(--amber);
+  background: var(--amber);
+  box-shadow: inset 0 0 0 2.5px var(--bg);
+}
+
+/* ───────────────────────────── 参数 ───────────────────────────────────── */
+
+.fields {
+  display: flex; gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.fields label {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1;
+  color: var(--fg-dim);
+}
+.fields input {
+  width: 46px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 6px;
+  text-align: center;
+}
+.fields input:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.fields .unit { color: var(--fg-faint); }
+
+.hint {
+  margin: 8px 2px 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-faint);
+}
+
+/* ───────────────────────────── 动作 ───────────────────────────────────── */
+
+.actions { display: flex; gap: 8px; margin-top: 14px; }
+
+.actions button {
+  font: inherit; cursor: pointer;
+  border-radius: 7px;
+  padding: 8px 0;
+  border: 1px solid transparent;
+}
+.primary {
+  flex: 1;
+  color: #231703;
+  background: var(--amber);
+  font-weight: 600;
+}
+.primary:hover { background: #f0b257; }
+
+.pause-wrap { position: relative; flex: 0 0 92px; }
+.ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  width: 100%;
+  color: var(--fg-dim);
+  background: none;
+  border-color: var(--line);
+}
+.ghost:hover { color: var(--fg); border-color: rgba(255,255,255,.26); }
+.ghost svg { width: 9px; height: 5px; }
+
+.menu {
+  position: absolute; right: 0; bottom: calc(100% + 6px);
+  min-width: 132px;
+  padding: 4px;
+  background: #2b2016;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 8px;
+  box-shadow: 0 10px 26px rgba(0,0,0,.5);
+  z-index: 2;
+}
+.menu button {
+  display: block; width: 100%;
+  font: inherit; text-align: left;
+  color: var(--fg-dim);
+  background: none; border: 0;
+  padding: 7px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.menu button:hover { background: rgba(255,255,255,.08); color: var(--fg); }
+
+button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }

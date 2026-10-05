@@ -8,10 +8,11 @@
 
 ## 当前状态
 
-**它现在真的会自己响了。** 实现顺序 7 步中的第 1、2、3 步完成 ——
-遮罩链路 + 调度器(单一 alarm + 幂等 `reconcile()` + 完整状态机)。
+**它会自己响,而且有界面了。** 实现顺序中的第 1、2、3、6 步完成 ——
+遮罩链路 + 调度器(单一 alarm + 幂等 `reconcile()` + 状态机)+ popup。
 
-还没有界面(popup 是第 6 步),所以改参数要走控制台,见下面「调试」。
+popup 本来排在第 6 步,提前做了:调度器没有界面就**无法验证**,
+而「它到底在不在工作」恰恰是这个产品唯一要回答的问题。
 
 | 文档 | 内容 |
 |---|---|
@@ -45,10 +46,11 @@
 1. 打开 `chrome://extensions`
 2. 右上角打开「**开发者模式**」
 3. 点「**加载已解压的扩展程序**」,选这个仓库的根目录
-4. 随便打开一个网页,**点一下工具栏里的 SimpleReminder 图标**
+4. 点工具栏里的 SimpleReminder 图标 → 弹出 popup
 
-应该立刻全屏盖上一层休息屏,20 秒后自动消失。
-**按住「按住跳过」一秒**,或者**按住 `Esc` 一秒**,可以提前结束。
+popup 里能看到**下次休息的时刻和实时倒计时**。点「立即休息」会马上
+全屏盖上,20 秒后自动消失 —— **按住「按住跳过」一秒**,或者
+**按住 `Esc` 一秒**,可以提前结束。
 
 > 遮罩盖不住 `chrome://` 开头的页面、Chrome 应用商店和 PDF 阅读器 ——
 > 这是 Chrome 的限制,不是 bug。见 [ARCHITECTURE §9](docs/ARCHITECTURE.md)。
@@ -62,29 +64,17 @@ Chrome 只在页面**加载时**注入 content script,安装和更新都不算�
 自动给已打开的标签页补注入,但如果你是直接覆盖文件后手动重载扩展,
 偶尔还是需要刷一下页面。
 
-### 调试
+### 怎么确认「它真的会自己响」
 
-还没有 popup,改参数和看状态都在 **service worker 控制台**:
-`chrome://extensions` → SimpleReminder 卡片上的「Service Worker」链接。
+⚠️ **点图标 ≠ 验证调度器。** 点图标 / 点「立即休息」是手动触发,
+它从第一版起就能用。调度器要验的是**你不操作它也会响**:
 
-```js
-// 间隔改 1 分钟、预告 5 秒,方便一分钟内看完整个周期
-// (改完立刻生效 —— settings 变更会触发 reconcile 重算)
-chrome.storage.sync.get('settings', ({settings}) =>
-  chrome.storage.sync.set({ settings: { ...settings, intervalMinutes: 1, preNoticeSeconds: 5 } }));
+1. 在 popup 里把**间隔改成 1**(分钟),焦点离开输入框即生效
+2. **关掉 popup,什么都别点**
+3. 看着工具栏图标等一分钟 —— 遮罩应该自己盖上来
 
-// 看当前状态机
-chrome.storage.local.get('runtime', console.log);
-
-// 看唯一的那个闹钟
-chrome.alarms.getAll(console.log);
-
-// 看埋点(按条目记跳过率,用来当调参助手)
-chrome.storage.local.get('stats', console.log);
-```
-
-> 预告相位目前**没有界面**(第 4 步才做),所以你会看到:到点后静默 5~8 秒,
-> 然后遮罩盖上。这是对的,不是卡了。
+改完间隔后重新打开 popup,「下次休息」的时刻应该已经重算成一分钟后,
+而不是沿用旧的 20 分钟。那一行就是调度器在工作的证据。
 
 ### 测试
 
@@ -92,13 +82,36 @@ chrome.storage.local.get('stats', console.log);
 node test/run.mjs
 ```
 
-零依赖,不需要 `npm install`。91 条断言,覆盖状态机、补齐逻辑、
-睡眠唤醒、延迟计数、并发去重、重复注入。改调度逻辑前先跑一遍。
+零依赖,不需要 `npm install`。112 条断言,覆盖状态机、补齐逻辑、
+睡眠唤醒三场景、延迟计数、并发去重、重复注入、展示函数。
 
-### 想单独调这一屏的视觉
+> 这是**跑在 Node 里的单元测试**,和你浏览器里装的那个扩展实例没有关系 ——
+> 它验的是代码逻辑对不对,不是「这次安装有没有生效」。
 
-`demo/break-stand.html` 是不接任何扩展逻辑的单文件原型,浏览器直接打开即可,
-按 `D` 调出参数面板。
+### 更深的调试
+
+`chrome://extensions` → SimpleReminder 卡片上的「**Service Worker**」链接
+→ Console。下面这些是 **JS,粘在那个控制台里**,不是终端命令:
+
+```js
+chrome.storage.local.get('runtime', console.log);   // 当前状态机
+chrome.alarms.getAll(console.log);                  // 唯一的那个闹钟
+chrome.storage.local.get('stats', console.log);     // 按条目的埋点
+```
+
+> 预告相位目前**没有界面**(第 4 步才做),所以到点后会静默几秒再盖上遮罩。
+> 这是对的,不是卡了 —— popup 里能看到它变成「马上休息」。
+
+### 不装扩展也能看
+
+```bash
+python3 -m http.server 8080      # 在仓库根目录
+```
+
+打开 `localhost:8080/demo/` —— popup 和休息屏都能真跑(假的 chrome API +
+真实的 `popup.js`),用来调视觉不用反复重载扩展。
+
+
 
 ---
 
@@ -119,7 +132,7 @@ node test/run.mjs
 
 ## 下一步
 
-**第 4 步:预告条。** 通栏贴顶的 `popover`,空格延迟,输入中自动延迟。
+**预告条。** 通栏贴顶的 `popover`,空格延迟,输入中自动延迟。
 
-状态机里的 `prenotice` 相位和 `POSTPONE` 消息已经就绪,第 4 步只剩 UI ——
+`prenotice` 相位和 `POSTPONE` 消息在调度器里已经就绪,只剩 UI ——
 把那 8 秒从「静默」变成「看得见」。

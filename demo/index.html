@@ -1,4 +1,31 @@
-<!doctype html><meta charset="utf-8">
-<title>SimpleReminder Demo</title>
-<meta http-equiv="refresh" content="0; url=break-stand.html">
-<a href="break-stand.html">站立休息屏 Demo →</a>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SimpleReminder · 预览</title>
+<style>
+  html { background: #15120e; }
+  body { margin: 0; min-height: 100vh; display: grid; place-content: center; gap: 26px;
+         font: 14px/1.7 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+         color: rgba(255,255,255,.82); }
+  h1 { font-size: 20px; font-weight: 300; letter-spacing: .04em; margin: 0; }
+  p  { margin: 0; color: rgba(255,255,255,.42); font-size: 13px; max-width: 460px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  a  { display: block; padding: 14px 18px; border-radius: 10px; text-decoration: none;
+       color: inherit; background: rgba(255,255,255,.05);
+       border: 1px solid rgba(255,255,255,.09); transition: .15s; }
+  a:hover { background: rgba(232,163,61,.12); border-color: rgba(232,163,61,.4); }
+  b  { display: block; font-weight: 500; }
+  s  { display: block; text-decoration: none; font-size: 12px; color: rgba(255,255,255,.4); margin-top: 2px; }
+</style>
+</head>
+<body>
+  <h1>SimpleReminder · 预览</h1>
+  <p>这两个页面都不需要安装扩展,是用假的 chrome API 跑真实代码。</p>
+  <ul>
+    <li><a href="popup-preview.html"><b>popup</b><s>倒计时 · 内容勾选 · 间隔时长 · 立即休息 · 暂停</s></a></li>
+    <li><a href="break-stand.html"><b>站立休息屏(调视觉用的原型)</b><s>按 D 打开参数面板</s></a></li>
+  </ul>
+</body>
+</html>

@@ -14,6 +14,7 @@
 
 import { IDEA_BY_ID, DEFAULT_IDEA } from '../lib/ideas.js';
 import { getSettings, getRuntime, DEFAULT_SETTINGS } from '../lib/storage.js';
+import { remainText } from '../lib/format.js';
 
 const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
 
@@ -60,18 +61,6 @@ let finishing = false;
   left.textContent = remainText((endsAt - now) / 1000);
   countRaf = requestAnimationFrame(countTick);
 })();
-
-/* ───────────────────────────── 剩余时间文案 ────────────────────────────── */
-
-/** @param {number} sec */
-function remainText(sec) {
-  sec = Math.max(0, Math.ceil(sec));
-  if (sec >= 60) {
-    const m = Math.floor(sec / 60), s = sec % 60;
-    return s ? `还有 ${m} 分 ${s} 秒` : `还有 ${m} 分钟`;
-  }
-  return `还有 ${sec} 秒`;
-}
 
 /* ──────────────────── 倒计时:进度条递减 + 剩余时间文字 ─────────────────── */
 

@@ -49,7 +49,8 @@ const MIN=60_000;
 
 await settle();
 console.log('── worker 启动 ───────────────────────────');
-ok(!!L.alarm && !!L.startup && !!L.installed && !!L.msg && !!L.click, '五个监听器都在顶层同步注册了');
+ok(!!L.alarm && !!L.startup && !!L.installed && !!L.msg, '四个入口都在顶层同步注册了(放进 async 会冷启动丢事件)');
+ok(!L.click, 'manifest 挂了 default_popup,action.onClicked 永不触发,不该注册它');
 ok(rt()?.phase==='idle' && rt().nextFireAt===NOW+20*MIN, 'worker 启动即 reconcile,排好下一轮');
 ok(alarms.get('next-wake')?.when===NOW+20*MIN, '排了唯一的 next-wake 闹钟');
 ok(alarms.size===1, '⭐ 自始至终只有一个闹钟');
@@ -109,10 +110,6 @@ await send({type:'SET_PAUSE', until:bg.PAUSE_FOREVER}); await settle();
 ok(alarms.size===0, '⭐ 无限期暂停 → 闹钟被清掉,不再空转');
 await send({type:'START_BREAK'}); await settle();
 ok(rt().phase==='breaking' && rt().pausedUntil===null, '「立即休息」解除暂停并直接进遮罩');
-
-console.log('\n── popup 要用的 GET_STATE ────────────────');
-const st = await send({type:'GET_STATE'});
-ok(st?.settings?.intervalMinutes===5 && st?.runtime?.phase==='breaking', 'GET_STATE 返回 settings + runtime');
 
 console.log(`\n${fail?'✗':'✓'} ${pass} 通过 / ${fail} 失败`);
 process.exit(fail?1:0);

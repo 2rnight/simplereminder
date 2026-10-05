@@ -50,11 +50,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 /* ── 用户动作入口 ──────────────────────────────────────────────────────── */
-
-// 临时入口,第 6 步会被 popup 的「立即休息」取代
-chrome.action.onClicked.addListener(() => {
-  queue(() => applyTransition(startBreakState, 'action-click'));
-});
+/* 注意:manifest 里挂了 default_popup,所以 chrome.action.onClicked
+   **永远不会触发**。所有用户动作都从 popup 走消息进来。 */
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   switch (msg?.type) {
@@ -78,11 +75,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         (now, _s, rt) => setPauseState(now, rt, msg.until ?? null),
         'set-pause',
       )).then(() => sendResponse({ ok: true }));
-      return true;
-
-    case 'GET_STATE':
-      Promise.all([getSettings(), getRuntime()])
-        .then(([settings, runtime]) => sendResponse({ settings, runtime }));
       return true;
 
     default:
