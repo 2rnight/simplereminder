@@ -78,11 +78,7 @@ export function reconcileState(now, settings, prev, opts = {}) {
     rt.breakEndsAt = null;
     rt.currentIdeaId = null;
     rt.nextFireAt = null;                       // 恢复时再重新起算
-    return {
-      rt,
-      events,
-      nextWake: rt.pausedUntil === PAUSE_FOREVER ? null : rt.pausedUntil,
-    };
+    return result(now, settings, rt, events);
   }
   if (rt.pausedUntil !== null) {                // 暂停已到期
     rt.pausedUntil = null;
@@ -166,6 +162,29 @@ export function reconcileState(now, settings, prev, opts = {}) {
     continue;
   }
 
+  return result(now, settings, rt, events);
+}
+
+/**
+ * ⭐ **所有**迁移函数的统一出口。
+ *
+ * 存在的理由只有一条:`idle` 相位 + `nextFireAt === null` 意味着没有下一次
+ * 唤醒,也就意味着再没有任何东西会唤醒 service worker —— 扩展静悄悄死掉,
+ * 而 UI 上只表现为「下次休息 --:--」,看起来像个显示问题。
+ *
+ * 这个状态最容易从**守卫分支**里漏出来:那些"条件不满足,什么都不做"的
+ * return,会原样把一个坏状态传出去。统一在这里补上,比指望每个分支都记得
+ * 检查可靠。test/scheduler.test.mjs 末尾那段 240 组合的扫描是它的看门狗。
+ *
+ * @param {number} now @param {Settings} settings
+ * @param {RuntimeState} rt @param {SchedEvent[]} events
+ * @returns {SchedResult}
+ */
+function result(now, settings, rt, events) {
+  const paused = rt.pausedUntil !== null && rt.pausedUntil > now;
+  if (rt.phase === 'idle' && rt.nextFireAt === null && !paused) {
+    rt.nextFireAt = now + Math.max(1, settings.intervalMinutes) * 60_000;
+  }
   return { rt, events, nextWake: computeNextWake(rt) };
 }
 
@@ -192,7 +211,7 @@ export function computeNextWake(rt) {
  */
 export function postponeState(now, settings, prev) {
   if (prev.phase !== 'prenotice') {
-    return { rt: { ...prev }, events: [], nextWake: computeNextWake(prev) };
+    return result(now, settings, { ...prev }, []);
   }
   const rt = {
     ...prev,
@@ -203,7 +222,7 @@ export function postponeState(now, settings, prev) {
     postponeCount: prev.postponeCount + 1,
     // currentIdeaId 故意保留 —— 延迟的是"这一次休息",内容不该换
   };
-  return { rt, events: [{ type: 'postponed', ideaId: rt.currentIdeaId }], nextWake: computeNextWake(rt) };
+  return result(now, settings, rt, [{ type: 'postponed', ideaId: rt.currentIdeaId }]);
 }
 
 /**
@@ -214,7 +233,7 @@ export function postponeState(now, settings, prev) {
  */
 export function startBreakState(now, settings, prev, opts = {}) {
   if (prev.phase === 'breaking' && (prev.breakEndsAt ?? 0) > now) {
-    return { rt: { ...prev }, events: [], nextWake: computeNextWake(prev) };   // 幂等
+    return result(now, settings, { ...prev }, []);                   // 幂等
   }
   const drawn = prev.currentIdeaId
     ? { ideaId: prev.currentIdeaId, bag: prev.ideaBag }
@@ -231,7 +250,7 @@ export function startBreakState(now, settings, prev, opts = {}) {
     ideaBag: drawn.bag,
     pausedUntil: null,                 // 手动要求休息 = 解除暂停
   };
-  return { rt, events: [{ type: 'break-start', ideaId: rt.currentIdeaId }], nextWake: computeNextWake(rt) };
+  return result(now, settings, rt, [{ type: 'break-start', ideaId: rt.currentIdeaId }]);
 }
 
 /**
@@ -245,7 +264,7 @@ export function startBreakState(now, settings, prev, opts = {}) {
  */
 export function endBreakState(now, settings, prev, reason) {
   if (prev.phase !== 'breaking') {                      // 幂等:重复上报只生效一次
-    return { rt: { ...prev }, events: [], nextWake: computeNextWake(prev) };
+    return result(now, settings, { ...prev }, []);
   }
   const rt = {
     ...prev,
@@ -256,11 +275,7 @@ export function endBreakState(now, settings, prev, reason) {
     postponeCount: 0,
     nextFireAt: now + Math.max(1, settings.intervalMinutes) * 60_000,
   };
-  return {
-    rt,
-    events: [{ type: `break-end:${reason}`, ideaId: prev.currentIdeaId }],
-    nextWake: computeNextWake(rt),
-  };
+  return result(now, settings, rt, [{ type: `break-end:${reason}`, ideaId: prev.currentIdeaId }]);
 }
 
 /**
@@ -268,8 +283,9 @@ export function endBreakState(now, settings, prev, reason) {
  * @param {number} _now @param {RuntimeState} prev @param {number|null} until
  * @returns {SchedResult}
  */
-export function setPauseState(_now, prev, until) {
+export function setPauseState(now, settings, prev, until) {
   const rt = { ...prev, pausedUntil: until };
+
   if (until !== null) {
     rt.phase = 'idle';
     rt.prenoticeStartedAt = null;
@@ -277,9 +293,126 @@ export function setPauseState(_now, prev, until) {
     rt.breakStartedAt = null;
     rt.breakEndsAt = null;
     rt.currentIdeaId = null;
-    rt.nextFireAt = null;
+    rt.nextFireAt = null;                       // 恢复时重新起算
+  } else {
+    /* ⭐ 恢复时**必须**重新起算 nextFireAt。
+       暂停那一刻把它置成了 null,如果这里不补上:
+       computeNextWake → null → 不排闹钟 → 再没有任何东西会唤醒
+       service worker → **扩展永久性死掉**,而且 popup 上只是显示
+       「下次休息 --:--」,看起来像个显示问题。
+       下面 assertAlive() 那条不变式就是为了让这类 bug 当场炸出来。 */
+    rt.nextFireAt = now + Math.max(1, settings.intervalMinutes) * 60_000;
+    rt.idleSince = null;
   }
-  return { rt, events: [{ type: until === null ? 'resumed' : 'paused' }], nextWake: computeNextWake(rt) };
+
+  return result(now, settings, rt, [{ type: until === null ? 'resumed' : 'paused' }]);
+}
+
+/* ──────────────────────────── 自然休息检测 ─────────────────────────────── */
+
+/**
+ * `chrome.idle` 状态变化。
+ *
+ * ⭐ 关键简化:我们把 **detectionInterval 设成 idleResetSeconds**。
+ * 这样「收到 idle 事件」本身就等价于「已经离开满那么久」—— 不需要再
+ * 拿 idleSince 去减,也就没有「idle 事件比实际离开晚 N 秒」的偏差。
+ *
+ * ⚠️ 离开期间**不动 nextFireAt**。人不在的时候,该响就响、该结束就结束
+ * (反正没人看见),回来那一下的 'active' 会把整个周期重排。
+ * 这比在这里猜「要不要暂停周期」稳得多,也避免了「读长文 5 分钟没动鼠标
+ * 就被判定成离开、从此不再提醒」这种反向故障。
+ *
+ * @param {number} now
+ * @param {Settings} settings
+ * @param {RuntimeState} prev
+ * @param {'active'|'idle'|'locked'} state
+ * @returns {SchedResult}
+ */
+export function setIdleState(now, settings, prev, state) {
+  const rt = { ...prev };
+  /** @type {SchedEvent[]} */
+  const events = [];
+
+  // 暂停盖过一切
+  if (rt.pausedUntil !== null && rt.pausedUntil > now) {
+    return result(now, settings, rt, events);
+  }
+
+  if (state !== 'active') {
+    if (rt.idleSince === null) {
+      rt.idleSince = now;
+      events.push({ type: 'went-idle' });
+    }
+    return result(now, settings, rt, events);
+  }
+
+  if (rt.idleSince === null) {                  // 本来就没离开过
+    return result(now, settings, rt, events);
+  }
+
+  /* 回来了,而且确实离开够久 = 已经休息过了,周期从头算。
+     如果回来时正好有遮罩盖着,一并撤掉 —— 他刚休息完,
+     再糊一脸正是 PRODUCT 里点名的那条最经典差评。 */
+  rt.idleSince = null;
+  rt.phase = 'idle';
+  rt.prenoticeStartedAt = null;
+  rt.prenoticeEndsAt = null;
+  rt.breakStartedAt = null;
+  rt.breakEndsAt = null;
+  rt.currentIdeaId = null;
+  rt.postponeCount = 0;
+  rt.nextFireAt = now + Math.max(1, settings.intervalMinutes) * 60_000;
+  events.push({ type: 'idle-reset' });
+
+  return result(now, settings, rt, events);
+}
+
+/* ──────────────────────────────── badge ────────────────────────────────── */
+
+/** 两次休息之间不该有东西在闪 —— idle 态用静音琥珀,不是警示色 */
+export const BADGE_COLOR = {
+  idle:   '#4a4034',
+  soon:   '#e8a33d',
+  paused: '#4a4a4a',
+};
+
+/**
+ * badge 该显示什么。纯函数,分钟级。
+ *
+ * badge 是这个扩展在浏览器里**唯一的常驻信号** —— chrome-stats 上那条
+ * 真实差评「点图标什么都没有…他们不会等 20 分钟」说的就是没有它的后果。
+ *
+ * @param {number} now
+ * @param {RuntimeState} rt
+ * @returns {{ text: string, color: string }}
+ */
+export function badgeFor(now, rt) {
+  if (rt.pausedUntil !== null && rt.pausedUntil > now) {
+    return { text: '||', color: BADGE_COLOR.paused };
+  }
+  if (rt.phase === 'prenotice') return { text: '!', color: BADGE_COLOR.soon };
+  // 休息中屏幕已经被盖住了,badge 没人看 —— 留空比显示 0 干净
+  if (rt.phase === 'breaking') return { text: '', color: BADGE_COLOR.soon };
+  if (rt.nextFireAt === null) return { text: '', color: BADGE_COLOR.idle };
+
+  const min = Math.ceil((rt.nextFireAt - now) / 60_000);
+  return { text: min > 0 ? String(min) : '', color: BADGE_COLOR.idle };
+}
+
+/**
+ * ⭐ 不变式:**只要没在暂停,就一定有下一次唤醒。**
+ *
+ * 违反它 = 没有闹钟 = 再没有任何东西会唤醒 service worker = 扩展静悄悄
+ * 死掉,而且 UI 上只表现为「下次休息 --:--」。这是这个产品最坏的失败方式,
+ * 所以把它写成一条可断言的不变式,而不是指望每次改调度时都记得。
+ *
+ * @param {SchedResult} res
+ * @returns {string|null} 违反时返回原因,正常返回 null
+ */
+export function assertAlive(res) {
+  const paused = res.rt.pausedUntil !== null;
+  if (res.nextWake === null && !paused) return 'nextWake 为 null 但并未暂停';
+  return null;
 }
 
 /* ──────────────────────────────── 洗牌袋 ───────────────────────────────── */

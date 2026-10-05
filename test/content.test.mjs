@@ -165,12 +165,33 @@ console.log('\n── 延迟 ─────────────────
 log.msgs.length = 0;
 const keydown = ctx.document.__h.keydown;
 
-// 焦点在普通元素:空格 = 延迟,且必须吃掉默认行为
+// 焦点在普通元素:Esc = 延迟
 let prevented = false;
 ctx.document.activeElement = { tagName: 'DIV', isContentEditable: false };
-keydown({ key: ' ', code: 'Space', preventDefault: () => { prevented = true; } });
-ok(log.msgs.some((m) => m.type === 'POSTPONE'), '空格 → 发 POSTPONE');
-ok(prevented, '⭐ 必须 preventDefault,否则「延迟了」和「页面滚一屏」会同时发生');
+keydown({ key: 'Escape', preventDefault: () => { prevented = true; } });
+ok(log.msgs.some((m) => m.type === 'POSTPONE'), 'Esc → 发 POSTPONE');
+ok(prevented, 'preventDefault,免得同一下按键在页面里再干一件事');
+
+// ⭐ 空格不再是延迟键 —— 它是页面的翻页键,得还给页面
+fire({ phase: 'prenotice', prenoticeStartedAt: now, prenoticeEndsAt: now + 8000,
+       currentIdeaId: 'stand', postponeCount: 0 });
+await tick();
+log.msgs.length = 0;
+let spacePrevented = false;
+keydown({ key: ' ', code: 'Space', preventDefault: () => { spacePrevented = true; } });
+ok(log.msgs.length === 0 && !spacePrevented,
+   '⭐ 空格原样放给页面 —— 预告那几秒照样能翻页');
+
+// 在输入框里**明确**按 Esc,算主动延迟,不该被说成"正在输入"
+fire({ phase: 'prenotice', prenoticeStartedAt: now, prenoticeEndsAt: now + 8000,
+       currentIdeaId: 'stand', postponeCount: 0 });
+await tick();
+log.msgs.length = 0;
+ctx.document.activeElement = { tagName: 'INPUT', isContentEditable: false };
+keydown({ key: 'Escape', preventDefault() {} });
+ok(log.msgs.some((m) => m.type === 'POSTPONE'), '输入框里按 Esc 也延迟');
+ok(b.querySelector('.sr-text').textContent !== '正在输入,已自动延后',
+   '⭐ 但不能说成"自动延后" —— 那是他自己按的');
 
 // 焦点在输入框:任意键都自动延迟
 fire({ phase: 'prenotice', prenoticeStartedAt: now, prenoticeEndsAt: now + 8000,

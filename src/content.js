@@ -369,21 +369,24 @@
 
     if (!barOpen || barHoldUntil) return;
 
+    /* ── 预告中:Esc → 延迟 ──
+       这条判断**必须排在"正在输入"前面**:人在输入框里明确按了 Esc,
+       那是主动延迟,不该被当成"系统替你延后了"。
+
+       为什么是 Esc 不是空格:空格是页面的翻页键。拦它会让预告那几秒
+       翻不了页,不拦又会"延迟了"和"页面滚一屏"同时发生。Esc 没有
+       这个冲突,而且和休息屏上"按住 Esc 跳过"是同一根手指。 */
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      requestPostpone('esc');
+      return;
+    }
+
     /* ── 预告中:正在输入 → 自动延迟 ──
        P4:静默的智能行为必须可见。延迟了就要说出来,否则用户以为它坏了。 */
     if (isEditable(document.activeElement)) {
       if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
       requestPostpone('typing');
-      return;
-    }
-
-    /* ── 预告中:空格 → 延迟 ──
-       这里必须 preventDefault,否则页面会同时滚动一屏 ——
-       「延迟了」和「页面跳走了」一起发生会很懵。
-       代价是预告那几秒内空格不能滚页面;条上明写着这个绑定,可接受。 */
-    if (e.key === ' ' || e.code === 'Space') {
-      e.preventDefault();
-      requestPostpone('space');
     }
   }
 
@@ -445,7 +448,7 @@
     badge.textContent = `已延迟 ×${rt.postponeCount}`;
 
     bar.querySelector('.sr-hint').innerHTML =
-      '<span class="sr-key">空格</span>延迟';
+      '<span class="sr-key">Esc</span>延迟';
 
     if (!barOpen) {
       barOpen = true;

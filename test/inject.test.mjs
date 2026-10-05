@@ -7,12 +7,14 @@ const injected=[];
 const alarms=new Map();
 globalThis.chrome={
   storage:{sync:area('sync'),local:area('local'),session:area('session'),onChanged:{addListener(){}}},
+  idle:{ onStateChanged:{addListener(){}}, setDetectionInterval(){}, async queryState(){ return 'active'; } },
   alarms:{onAlarm:{addListener(f){L.alarm=f}},
-          async clear(n){return alarms.delete(n)}, async create(n,o){alarms.set(n,o)}},
+          async get(){ return undefined; }, async clear(n){return alarms.delete(n)}, async create(n,o){alarms.set(n,o)}},
   runtime:{onInstalled:{addListener(f){L.installed=f}},onStartup:{addListener(f){L.startup=f}},
            onMessage:{addListener(f){L.msg=f}},getManifest:()=>({version:'0.1.0'}),
            getURL:p=>'chrome-extension://fake/'+p, id:'fake'},
-  action:{onClicked:{addListener(f){L.click=f}}},
+  action:{onClicked:{addListener(f){L.click=f}},
+          async setBadgeText(){}, async setBadgeBackgroundColor(){}},
   tabs:{query:async()=>[
     {id:1,url:'https://news.ycombinator.com/',active:false,discarded:false},
     {id:2,url:'https://www.google.com/',       active:true, discarded:false},

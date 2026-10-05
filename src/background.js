@@ -21,23 +21,43 @@ import {
 } from './lib/storage.js';
 import {
   reconcileState, postponeState, startBreakState, endBreakState, setPauseState,
+  setIdleState, badgeFor, assertAlive,
   ALARM_NAME, PAUSE_FOREVER,
 } from './lib/scheduler.js';
+
+/** badge 的分钟级心跳。和 next-wake 分开两个闹钟:
+    一个管正确性(必须准),一个管好看(可以丢)。 */
+const BADGE_ALARM = 'badge-tick';
 
 /* ═══════════════════ 顶层同步注册的监听器(四个入口)═══════════════════ */
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) queue(() => applyTransition(reconcileState, 'alarm'));
+  // badge 心跳不参与任何状态决定,只是重画那两个字符
+  if (alarm.name === BADGE_ALARM) queue(() => refreshBadge());
+});
+
+/* ⭐ 自然休息检测。离开电脑超过 idleResetSeconds 就等于已经休息过了,
+   回来不该立刻被糊一脸 —— 这是 PRODUCT 里点名的最经典差评场景。 */
+chrome.idle.onStateChanged.addListener((state) => {
+  queue(() => applyTransition(
+    (now, s, rt) => setIdleState(now, s, rt, state),
+    `idle:${state}`,
+  ));
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  queue(() => applyTransition(reconcileState, 'startup'));
+  queue(async () => {
+    await syncIdleDetection();
+    await applyTransition(reconcileState, 'startup');
+  });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   queue(async () => {
     // 落一份干净的运行时状态,避免上一次安装的残留把遮罩钉死
     await chrome.storage.local.set({ [KEY_RUNTIME]: { ...DEFAULT_RUNTIME } });
+    await syncIdleDetection();
     await applyTransition(reconcileState, 'installed');
     await injectIntoOpenTabs();
   });
@@ -79,7 +99,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     case 'SET_PAUSE':
       queue(() => applyTransition(
-        (now, _s, rt) => setPauseState(now, rt, msg.until ?? null),
+        (now, s, rt) => setPauseState(now, s, rt, msg.until ?? null),
         'set-pause',
       )).then(() => sendResponse({ ok: true }));
       return true;
@@ -119,7 +139,13 @@ async function applyTransition(fn, reason) {
   const settings = await getSettings();
   const prev = await getRuntime();
 
-  const { rt, events, nextWake } = fn(now, settings, prev);
+  const res = fn(now, settings, prev);
+  const { rt, events, nextWake } = res;
+
+  /* ⭐ 不变式自检:没在暂停就必须有下一次唤醒。
+     违反它意味着扩展会静悄悄死掉,而 UI 上只表现为「下次休息 --:--」。
+     真发生了就当场兜住 + 喊出来,而不是等用户两天后发现它再也不响。 */
+  const dead = assertAlive(res);
 
   for (const ev of events) {
     if (ev.type === 'break-end' || ev.type === 'break-end:completed') {
@@ -131,10 +157,18 @@ async function applyTransition(fn, reason) {
     }
   }
 
+  let wake = nextWake;
+  if (dead) {
+    console.error('[SimpleReminder] 调度不变式被破坏:', dead, '(', reason, ')');
+    rt.nextFireAt = now + Math.max(1, settings.intervalMinutes) * 60_000;
+    wake = rt.nextFireAt;
+  }
+
   if (JSON.stringify(rt) !== JSON.stringify(prev)) {
     await chrome.storage.local.set({ [KEY_RUNTIME]: rt });
   }
-  await scheduleWake(nextWake);
+  await scheduleWake(wake);
+  await syncBadge(now, rt);
 
   if (events.length) {
     console.debug('[SimpleReminder]', reason, '→', rt.phase, events.map((e) => e.type).join(','));
@@ -154,6 +188,7 @@ async function onSettingsChanged(change) {
       await chrome.storage.local.set({ [KEY_RUNTIME]: { ...rt, nextFireAt: null } });
     }
   }
+  if (before.idleResetSeconds !== after.idleResetSeconds) await syncIdleDetection();
   await applyTransition(reconcileState, 'settings-changed');
 }
 
@@ -188,6 +223,63 @@ async function scheduleWake(when) {
       () => queue(() => applyTransition(reconcileState, 'fast-path')),
       delay + 50,
     );
+  }
+}
+
+/* ═══════════════════════════ badge ═════════════════════════════════════
+   badge 是这个扩展在浏览器里**唯一的常驻信号**。chrome-stats 上那条真实
+   差评「点图标什么都没有…他们不会等 20 分钟」说的就是没有它的后果。
+
+   分钟级心跳用一个**独立的** periodic alarm,和 next-wake 分开:
+   一个管正确性(必须准),一个管好看(丢了无所谓)。
+
+   ⭐ 心跳只在「idle 相位 + 未暂停 + 人在电脑前」时才跑。
+   离开电脑时没人看 badge,再每分钟唤醒 service worker 就纯属耗电。
+   ===================================================================== */
+
+/** @param {number} now @param {any} rt */
+async function syncBadge(now, rt) {
+  const { text, color } = badgeFor(now, rt);
+  try {
+    await chrome.action.setBadgeText({ text });
+    if (text) await chrome.action.setBadgeBackgroundColor({ color });
+  } catch { /* 窗口全关时 action API 可能不可用 */ }
+
+  const wantTick = rt.phase === 'idle'
+    && rt.idleSince === null
+    && !(rt.pausedUntil !== null && rt.pausedUntil > now)
+    && rt.nextFireAt !== null;
+
+  const existing = await chrome.alarms.get(BADGE_ALARM);
+  if (wantTick && !existing) {
+    await chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 });
+  } else if (!wantTick && existing) {
+    await chrome.alarms.clear(BADGE_ALARM);
+  }
+}
+
+/** 心跳回调:只重画,不碰状态 */
+async function refreshBadge() {
+  await syncBadge(Date.now(), await getRuntime());
+}
+
+/* ═══════════════════════ 自然休息检测 ══════════════════════════════════
+   ⭐ detectionInterval 直接设成 idleResetSeconds,于是「收到 idle 事件」
+   本身就等价于「已经离开满那么久」—— 不用再拿时间戳去减,也就没有
+   「idle 事件比实际离开晚 N 秒」的偏差。判断逻辑见 scheduler.setIdleState。
+   ===================================================================== */
+
+async function syncIdleDetection() {
+  const settings = await getSettings();
+  // Chrome 下限 15 秒
+  const seconds = Math.max(15, Math.round(settings.idleResetSeconds));
+  try {
+    chrome.idle.setDetectionInterval(seconds);
+    // 冷启动时对齐一次:SW 被回收期间发生的 idle 变化收不到事件
+    const state = await chrome.idle.queryState(seconds);
+    await applyTransition((now, s, rt) => setIdleState(now, s, rt, state), `idle-query:${state}`);
+  } catch (err) {
+    console.error('[SimpleReminder] idle 检测初始化失败', err);
   }
 }
 
@@ -231,6 +323,10 @@ async function injectIntoOpenTabs() {
    ===================================================================== */
 
 queue(async () => {
+  // ⭐ detectionInterval 要在**每次** worker 冷启动时重设。
+  // SW 被回收后这个值不保证还在,而 onStartup 只在浏览器启动时触发一次 ——
+  // 靠事件唤醒的那些冷启动根本走不到那里。
+  await syncIdleDetection();
   await applyTransition(reconcileState, 'worker-start');
   try {
     const got = await chrome.storage.session.get(INJECT_MARK);

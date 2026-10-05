@@ -54,10 +54,10 @@
   <h1>预告条预览</h1>
   <div class="meta">这是真的 <code>content.js</code> 跑在假的 chrome API 上,不是截图。</div>
 
-  <p>预告条会从页面顶端滑下来,压在这个假网页最上方。它用的是原生
+  <p>预告条会从页面顶端滑下来,压在这个假网页最上方。用 Esc 而不是空格,是因为空格是页面的翻页键 —— 拦它会让这几秒翻不了页。它用的是原生
   <code>popover="manual"</code> —— <b>非模态</b>,所以页面仍然可以滚动、可以点、可以输入。</p>
 
-  <p>试这几件事:<b>①</b> 按空格 → 延迟(页面不会跟着滚一屏)。
+  <p>试这几件事:<b>①</b> 按 Esc → 延迟。
   <b>②</b> 点预告条本身 → 同样是延迟。
   <b>③</b> 把光标放进下面的输入框再打字 → 自动延迟,并且条上会告诉你它干了什么。</p>
 
@@ -135,7 +135,7 @@ await import('../src/content.js');
 let looping = true;
 async function show() {
   const now = Date.now();
-  log('预告中 · 按空格 / 点条 / 在输入框打字');
+  log('预告中 · 按 Esc / 点条 / 在输入框打字');
   await setRuntime({ ...runtime, phase: 'prenotice',
                      prenoticeStartedAt: now, prenoticeEndsAt: now + 8000 });
 }

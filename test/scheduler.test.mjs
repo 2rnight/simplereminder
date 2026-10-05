@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 import { reconcileState, postponeState, startBreakState, endBreakState,
-         setPauseState, computeNextWake, drawIdea, PAUSE_FOREVER, STALE_MS }
+         setPauseState, setIdleState, badgeFor, assertAlive,
+         computeNextWake, drawIdea, PAUSE_FOREVER, STALE_MS }
   from '../src/lib/scheduler.js';
 import { DEFAULT_SETTINGS, DEFAULT_RUNTIME } from '../src/lib/storage.js';
 
@@ -115,15 +116,15 @@ ok(s1.rt.phase==='breaking' && s1.rt.prenoticeEndsAt===null, '立即休息 → �
 ok(startBreakState(T0+1, S(), s1.rt).events.length===0, '休息中再点「立即休息」是幂等的');
 
 console.log('\n── 暂停 ───────────────────────────────────');
-let q = setPauseState(T0, R({phase:'prenotice', prenoticeEndsAt:T0+8000, currentIdeaId:'stand'}), T0+30*MIN);
+let q = setPauseState(T0, S(), R({phase:'prenotice', prenoticeEndsAt:T0+8000, currentIdeaId:'stand'}), T0+30*MIN);
 ok(q.rt.phase==='idle' && q.rt.currentIdeaId===null, '暂停会取消进行中的预告');
 ok(q.nextWake===T0+30*MIN, '暂停期间只需在到期时醒来');
 let q2 = reconcileState(T0+10*MIN, S(), q.rt);
 ok(q2.rt.phase==='idle' && q2.rt.nextFireAt===null, '暂停期内不排下一次');
 let q3 = reconcileState(T0+30*MIN+1, S(), q.rt);
 ok(q3.rt.pausedUntil===null && q3.rt.nextFireAt===T0+30*MIN+1+20*MIN, '暂停到期 → 恢复并重新起算');
-ok(computeNextWake(setPauseState(T0,R(),PAUSE_FOREVER).rt)===null, '无限期暂停 → 不排闹钟');
-ok(startBreakState(T0, S(), setPauseState(T0,R(),PAUSE_FOREVER).rt, {random:rnd}).rt.pausedUntil===null,
+ok(computeNextWake(setPauseState(T0,S(),R(),PAUSE_FOREVER).rt)===null, '无限期暂停 → 不排闹钟');
+ok(startBreakState(T0, S(), setPauseState(T0,S(),R(),PAUSE_FOREVER).rt, {random:rnd}).rt.pausedUntil===null,
    '手动要求「立即休息」会解除暂停');
 
 console.log('\n── 配置边界 ───────────────────────────────');
@@ -143,6 +144,112 @@ ok(drawIdea(S({ideas:[{id:'stand',enabled:false},{id:'eyes',enabled:false},{id:'
 console.log('\n── 损坏状态不能把状态机卡死 ───────────────');
 ok(reconcileState(T0, S(), R({phase:'prenotice', prenoticeEndsAt:null})).rt.phase==='idle', 'prenotice 缺时间戳 → 退回 idle');
 ok(reconcileState(T0, S(), R({phase:'breaking', breakEndsAt:null})).rt.phase==='idle', 'breaking 缺时间戳 → 退回 idle');
+
+
+console.log('\n── ⭐ 暂停 → 恢复(回归)──────────────────');
+{
+  let p = setPauseState(T0, S(), R({nextFireAt:T0+10*MIN}), T0+30*MIN);
+  ok(p.rt.nextFireAt===null && p.nextWake===T0+30*MIN, '暂停:清空 nextFireAt,只等到期');
+  let u = setPauseState(T0+5*MIN, S(), p.rt, null);
+  ok(u.rt.pausedUntil===null, '恢复:清掉 pausedUntil');
+  ok(u.rt.nextFireAt===T0+5*MIN+20*MIN,
+     '⭐ 恢复必须重算 nextFireAt —— 不补的话扩展就此永久死掉');
+  ok(u.nextWake===u.rt.nextFireAt, '⭐ 恢复后 nextWake 不是 null(bug 的实质)');
+  ok(assertAlive(u)===null, '不变式成立');
+  // 无限期暂停后恢复,同样要活过来
+  let f = setPauseState(T0, S(), R(), PAUSE_FOREVER);
+  ok(assertAlive(setPauseState(T0+3*MIN, S(), f.rt, null))===null, '无限期暂停恢复后也活着');
+}
+
+console.log('\n── ⭐ 自然休息检测 ───────────────────────');
+{
+  // 离开:只记时刻,不动周期
+  let a = setIdleState(T0, S(), R({nextFireAt:T0+8*MIN}), 'idle');
+  ok(a.rt.idleSince===T0, '记下离开时刻');
+  ok(a.rt.nextFireAt===T0+8*MIN,
+     '⭐ 离开期间不动 nextFireAt —— 猜"要不要暂停周期"不如回来时重排稳');
+  ok(setIdleState(T0, S(), R(), 'locked').rt.idleSince===T0, '锁屏等同离开');
+  ok(setIdleState(T0+MIN, S(), a.rt, 'idle').rt.idleSince===T0, '重复 idle 事件不刷新时刻');
+
+  // 回来:整轮重排
+  let b = setIdleState(T0+30*MIN, S(), a.rt, 'active');
+  ok(b.rt.idleSince===null, '回来了');
+  ok(b.rt.nextFireAt===T0+30*MIN+20*MIN,
+     '⭐ 回来 = 已经休息过了 —— 周期从头算,不能一回来就糊一脸');
+  ok(b.events.some(e=>e.type==='idle-reset'), '发 idle-reset 事件');
+
+  // 本来就没离开过 → no-op
+  let c = setIdleState(T0, S(), R({nextFireAt:T0+5*MIN}), 'active');
+  ok(c.rt.nextFireAt===T0+5*MIN && c.events.length===0, '没离开过 → active 是 no-op');
+
+  // 回来时正盖着遮罩 → 撤掉
+  let d = setIdleState(T0+30*MIN, S(),
+    R({phase:'breaking', breakEndsAt:T0+30*MIN+10_000, currentIdeaId:'stand', idleSince:T0}), 'active');
+  ok(d.rt.phase==='idle' && d.rt.breakEndsAt===null, '⭐ 回来时撤掉遮罩 —— 他刚休息完');
+
+  // 暂停优先
+  let e = setIdleState(T0, S(), R({pausedUntil:T0+MIN}), 'idle');
+  ok(e.rt.idleSince===null, '暂停中不理会 idle 事件');
+}
+
+console.log('\n── badge ─────────────────────────────────');
+{
+  ok(badgeFor(T0, R({nextFireAt:T0+20*MIN})).text==='20', '20 分钟 → "20"');
+  ok(badgeFor(T0, R({nextFireAt:T0+30_000})).text==='1', '⭐ 不足 1 分钟向上取整 → "1",不会显示 0');
+  ok(badgeFor(T0, R({nextFireAt:T0-5_000})).text==='', '已过点 → 留空');
+  ok(badgeFor(T0, R({nextFireAt:null})).text==='', '还没排 → 留空');
+  ok(badgeFor(T0, R({phase:'prenotice', nextFireAt:T0})).text==='!', '预告 → "!"');
+  ok(badgeFor(T0, R({phase:'breaking', breakEndsAt:T0+20_000})).text==='',
+     '遮罩期间留空 —— 屏幕已经盖住了,没人看 badge');
+  ok(badgeFor(T0, R({pausedUntil:T0+MIN, nextFireAt:T0+5*MIN})).text==='||', '暂停 → "||"');
+  ok(badgeFor(T0, R({pausedUntil:PAUSE_FOREVER})).text==='||', '无限期暂停 → "||"');
+  ok(badgeFor(T0, R({pausedUntil:T0-MIN, nextFireAt:T0+5*MIN})).text==='5', '暂停已过期 → 照常倒计时');
+}
+
+console.log('\n── ⭐ 不变式扫描:没在暂停就必须有下一次唤醒 ──');
+{
+  /* 这一段才是真正值钱的部分。
+     「恢复后 nextWake 为 null」那个 bug 的后果是扩展永久性死掉,而 UI 上
+     只表现为「下次休息 --:--」—— 看起来像个显示问题。与其指望每次改调度
+     时都记得检查,不如把它写成一条对**所有**迁移、**所有**状态都成立的
+     不变式,新加迁移函数时自然被覆盖。 */
+  const states = [
+    ['空',           R()],
+    ['已排期',        R({nextFireAt:T0+10*MIN})],
+    ['已到点',        R({nextFireAt:T0})],
+    ['过期很久',      R({nextFireAt:T0-60*MIN})],
+    ['预告中',        R({phase:'prenotice', nextFireAt:T0, prenoticeStartedAt:T0, prenoticeEndsAt:T0+8000, currentIdeaId:'stand'})],
+    ['休息中',        R({phase:'breaking', breakStartedAt:T0, breakEndsAt:T0+20_000, currentIdeaId:'stand'})],
+    ['暂停已到期',    R({pausedUntil:T0-MIN})],
+    ['刚恢复',        setPauseState(T0,S(),R({nextFireAt:T0+5*MIN}),T0+MIN).rt],
+    ['离开中',        R({nextFireAt:T0+5*MIN, idleSince:T0-10*MIN})],
+    ['延迟过 3 次',   R({nextFireAt:T0+MIN, postponeCount:3, currentIdeaId:'eyes'})],
+  ];
+  const moves = [
+    ['reconcile',   (n,s,rt)=>reconcileState(n,s,rt,{random:rnd})],
+    ['postpone',    postponeState],
+    ['startBreak',  (n,s,rt)=>startBreakState(n,s,rt,{random:rnd})],
+    ['endBreak-ok', (n,s,rt)=>endBreakState(n,s,rt,'completed')],
+    ['endBreak-skip',(n,s,rt)=>endBreakState(n,s,rt,'skipped')],
+    ['resume',      (n,s,rt)=>setPauseState(n,s,rt,null)],
+    ['idle→走',     (n,s,rt)=>setIdleState(n,s,rt,'idle')],
+    ['idle→回',     (n,s,rt)=>setIdleState(n,s,rt,'active')],
+  ];
+  let bad = [];
+  for (const [sn, st] of states) for (const [mn, mv] of moves) {
+    for (const t of [T0, T0+MIN, T0+90*MIN]) {
+      const why = assertAlive(mv(t, S(), st));
+      if (why) bad.push(`${sn} + ${mn} @+${(t-T0)/MIN}min:${why}`);
+    }
+  }
+  ok(bad.length===0,
+     `${states.length}×${moves.length}×3 = ${states.length*moves.length*3} 种组合,没在暂停时全都排了下一次唤醒`);
+  if (bad.length) console.log('   ' + bad.slice(0,6).join('\n   '));
+
+  // 反向:暂停状态下允许没有唤醒(无限期暂停就该清掉闹钟)
+  ok(assertAlive(setPauseState(T0,S(),R(),PAUSE_FOREVER))===null,
+     '无限期暂停时 nextWake 为 null 是合法的,不算违反');
+}
 
 console.log(`\n${fail?'✗':'✓'} ${pass} 通过 / ${fail} 失败`);
 process.exit(fail?1:0);

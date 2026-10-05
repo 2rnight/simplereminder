@@ -384,10 +384,23 @@ docs/
 2. ✅ **content script**:`<dialog>` + iframe 挂载、`showModal`、Top Layer 抢回、自愈 observer
 3. ✅ **`background.js`**:`reconcile()` + 单 alarm + 状态机
    调度核心抽成纯函数 `lib/scheduler.js`,回归测试见 `test/`(`node test/run.mjs`)
-4. ✅ **预告条** `popover="manual"` + 空格延迟 + 输入中自动延迟
-5. ⬜ idle 检测 + 暂停 + badge
+4. ✅ **预告条** `popover="manual"` + Esc 延迟 + 输入中自动延迟
+5. ✅ **idle 检测 + 暂停 + badge**
 6. ✅ **popup** —— **提前到第 3 步之后做**。原因见下
-7. ⬜ 埋点展示(记录已在第 2 步随手做掉)
+7. ⬜ 埋点展示(记录已在第 2 步随手做掉)—— **v0.1 只剩这一项**
+
+### 第 5 步落地时确认的事实
+
+| 事实 | 影响 |
+|---|---|
+| ⭐ **「暂停后恢复」会让扩展永久性死掉** | `setPauseState` 恢复分支没有重算 `nextFireAt`(暂停时已把它置空)→ `nextWake` 为 `null` → **不排闹钟** → 再没有任何东西会唤醒 service worker。而 UI 上只表现为「下次休息 --:--」,**看起来像个显示问题**。这是这个产品最坏的失败方式 |
+| ⭐ **同类 bug 不止一个** | 加了不变式扫描(240 组合)之后,立刻又抓出 `postponeState` / `endBreakState` 的**守卫分支** —— 那些"条件不满足,什么都不做"的 `return` 会把坏状态原样传出去。于是所有迁移改走统一出口 `result()`,它负责兜住这个状态 |
+| ⭐ **不变式比 case-by-case 的测试值钱** | 「没在暂停就必须有下一次唤醒」是一条对所有迁移、所有状态都成立的性质。写成扫描之后,**新加迁移函数时自动被覆盖**,不依赖"记得补测试" |
+| ⭐ **`idleResetSeconds: 60` 是错的** | 封板时写的 `max(duration, 60)`。**60 秒没有输入不等于离开** —— 读一屏长文就够了。那会让读者被判定成离开、从此不再提醒,而读者恰恰最需要提醒。改成 5 分钟(与 Stretchly 一致) |
+| ⭐ **detectionInterval 设成 idleResetSeconds,idle 事件本身就是信号** | 这样"收到 idle 事件"直接等价于"已经离开满那么久",不用再拿时间戳去减,也就没有"idle 事件比实际离开晚 N 秒"的偏差 |
+| ⭐ **离开期间不要动 `nextFireAt`** | 试图在离开时"暂停周期"会引出一堆边界。更稳的做法:人不在时该响就响、该结束就结束(反正没人看见),**回来那一下的 `active` 把整轮重排**。回来时正盖着遮罩就一并撤掉 —— 他刚休息完 |
+| **`setDetectionInterval` 要在每次 worker 冷启动时重设** | `onStartup` 只在浏览器启动时触发一次,靠事件唤醒的冷启动走不到那里 |
+| **badge 用独立的 periodic alarm** | 和 `next-wake` 分开:一个管正确性(必须准),一个管好看(丢了无所谓)。⭐ 心跳只在「idle 相位 + 未暂停 + 人在电脑前」时跑 —— 离开电脑时没人看 badge,再每分钟唤醒 SW 纯属耗电 |
 
 ### 第 4 步落地时确认的事实
 
@@ -396,7 +409,7 @@ docs/
 | ⭐ **预告 8 秒没有任何够得着的闹钟** | alarm 下限 30 秒。`prenotice → breaking` 这个过渡**没有驱动者** —— 第 3 步留下的缺口。补法:预告条自己的进度线走到 0 时发 `RECONCILE` 消息推一把。页面是唯一拿着精确倒计时的一方 |
 | ⭐ **`popover` 的 UA 默认样式要全部覆盖** | 默认是**居中的 `fit-content` 方框**,不覆盖就不是通栏贴顶。要重置 `position/inset/width/max-width/max-height/margin/border/padding` |
 | ⭐ **`pointer-events` 会继承进 Top Layer** | 宿主节点是 `pointer-events:none`,而 Top Layer 元素在 DOM 上仍是它的后代 → 预告条整条点不动。必须在元素上显式收回 `auto`(dialog 同理) |
-| ⭐ **空格必须 `preventDefault`** | 否则「延迟了」和「页面滚一屏」会同时发生,用户会很懵。代价:预告那几秒空格不能滚页面。条上明写着这个绑定,**自用两周重点观察这条** |
+| ⭐ **延迟键从空格换成 `Esc`** | 空格是页面的翻页键:拦它则预告那几秒翻不了页,不拦则「延迟了」和「页面滚一屏」同时发生 —— 两头都不对。`Esc` 没有这个冲突,而且和休息屏上「按住 Esc 跳过」是同一根手指 |
 | **content script 不能 `import`,但可以 `import()`** | 动态 `import(chrome.runtime.getURL('src/lib/ideas.js'))` 是 Chrome 官方给出的办法。这样三条内容只有一份,不会和 content.js 里的副本漂移 |
 | **进度线的分母必须来自 storage** | 用「第一次看到它的时刻」当起点的话,预告中途打开的标签页会从满格重新走一遍。故新增 `prenoticeStartedAt` |
 | **`popover` 需要 Chrome 114+** | manifest 加 `minimum_chrome_version: "114"`,比运行时降级分支干净 |

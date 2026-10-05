@@ -20,7 +20,12 @@ export const KEY_STATS    = 'stats';      // chrome.storage.local
  * @property {number} skipHoldMs
  * @property {'top'} preNoticePosition
  * @property {boolean} interruptFullscreenVideo
- * @property {number} idleResetSeconds       实际取 max(durationSeconds, 60)
+ * @property {number} idleResetSeconds  离开多久算"已经休息过了"。
+ *   ⚠️ 不能设小。封板时写的 max(duration, 60) 是错的 —— **60 秒没有输入
+ *   不等于离开**,读一屏长文就够了。那样会让读者被判定成离开、从此不再
+ *   提醒,而读者恰恰是最需要提醒的人。取 5 分钟(与 Stretchly 一致)。
+ *   这个值同时被用作 chrome.idle 的 detectionInterval,所以"收到 idle
+ *   事件"本身就等价于"已经离开满这么久"。
  * @property {{id:string, enabled:boolean}[]} ideas
  */
 
@@ -33,7 +38,7 @@ export const DEFAULT_SETTINGS = {
   skipHoldMs: 1000,
   preNoticePosition: 'top',
   interruptFullscreenVideo: false,
-  idleResetSeconds: 60,
+  idleResetSeconds: 300,
   ideas: [
     { id: 'stand', enabled: true  },
     { id: 'eyes',  enabled: true  },
@@ -48,6 +53,7 @@ export const DEFAULT_SETTINGS = {
  * @typedef {Object} RuntimeState
  * @property {'idle'|'prenotice'|'breaking'} phase
  * @property {number|null} nextFireAt       ⭐ 绝对时间戳 —— 预告该开始的时刻
+ * @property {number|null} idleSince  ⭐ 进入 idle 的时刻(null = 人在)
  * @property {number|null} prenoticeStartedAt ⭐ 绝对时间戳(预告进度线的分母)
  * @property {number|null} prenoticeEndsAt  ⭐ 绝对时间戳 —— 预告结束 = 休息开始
  * @property {number|null} breakStartedAt   ⭐ 绝对时间戳(进度条算分母用)
@@ -62,6 +68,7 @@ export const DEFAULT_SETTINGS = {
 export const DEFAULT_RUNTIME = {
   phase: 'idle',
   nextFireAt: null,
+  idleSince: null,
   prenoticeStartedAt: null,
   prenoticeEndsAt: null,
   breakStartedAt: null,
