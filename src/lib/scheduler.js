@@ -72,6 +72,7 @@ export function reconcileState(now, settings, prev, opts = {}) {
   if (rt.pausedUntil !== null && rt.pausedUntil > now) {
     if (rt.phase !== 'idle') events.push({ type: 'cancelled-by-pause' });
     rt.phase = 'idle';
+    rt.prenoticeStartedAt = null;
     rt.prenoticeEndsAt = null;
     rt.breakStartedAt = null;
     rt.breakEndsAt = null;
@@ -114,6 +115,7 @@ export function reconcileState(now, settings, prev, opts = {}) {
         rt.phase = 'prenotice';
         // 用 now 而不是 nextFireAt + pre:调度可以迟到,但预告该有的 8 秒
         // 不能被迟到时间吃掉,否则用户可能只看到 1 秒预告条就黑屏了
+        rt.prenoticeStartedAt = now;
         rt.prenoticeEndsAt = now + pre;
         events.push({ type: 'prenotice-start', ideaId: rt.currentIdeaId });
       } else {
@@ -132,6 +134,7 @@ export function reconcileState(now, settings, prev, opts = {}) {
       if (now - rt.prenoticeEndsAt > STALE_MS) {
         // 预告期间睡过去了 —— 绝不能一醒来就黑屏
         rt.phase = 'idle';
+        rt.prenoticeStartedAt = null;
         rt.prenoticeEndsAt = null;
         rt.currentIdeaId = null;
         rt.nextFireAt = now + interval;
@@ -140,6 +143,7 @@ export function reconcileState(now, settings, prev, opts = {}) {
       }
 
       rt.phase = 'breaking';
+      rt.prenoticeStartedAt = null;
       rt.prenoticeEndsAt = null;
       rt.breakStartedAt = now;                 // 同理,休息时长不被调度延迟吃掉
       rt.breakEndsAt = now + duration;
@@ -193,6 +197,7 @@ export function postponeState(now, settings, prev) {
   const rt = {
     ...prev,
     phase: /** @type {'idle'} */ ('idle'),
+    prenoticeStartedAt: null,
     prenoticeEndsAt: null,
     nextFireAt: now + Math.max(1, settings.postponeMinutes) * 60_000,
     postponeCount: prev.postponeCount + 1,
@@ -218,6 +223,7 @@ export function startBreakState(now, settings, prev, opts = {}) {
   const rt = {
     ...prev,
     phase: /** @type {'breaking'} */ ('breaking'),
+    prenoticeStartedAt: null,
     prenoticeEndsAt: null,
     breakStartedAt: now,
     breakEndsAt: now + Math.max(1, settings.durationSeconds) * 1000,
@@ -266,6 +272,7 @@ export function setPauseState(_now, prev, until) {
   const rt = { ...prev, pausedUntil: until };
   if (until !== null) {
     rt.phase = 'idle';
+    rt.prenoticeStartedAt = null;
     rt.prenoticeEndsAt = null;
     rt.breakStartedAt = null;
     rt.breakEndsAt = null;

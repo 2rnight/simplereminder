@@ -90,6 +90,19 @@ const d = (stats()[id2]?.completed||0)+(stats()[id2]?.skipped||0) - (()=>{const 
 ok(d===1, '⭐ 三路并发结束同一次休息,埋点总共只 +1(实际 +'+d+')');
 ok(rt().phase==='idle', '状态正确落到 idle');
 
+console.log('\n── 页面侧推一把(RECONCILE)──────────────');
+// 预告 8 秒 < alarm 下限 30 秒,闹钟管不了这个过渡,必须由页面触发
+NOW = rt().nextFireAt; await L.alarm({name:'next-wake'}); await settle();
+ok(rt().phase==='prenotice','(前置)处于预告');
+NOW = rt().prenoticeEndsAt;
+await send({type:'RECONCILE'}); await settle();
+ok(rt().phase==='breaking', '⭐ 页面侧 RECONCILE 推进了预告→休息(闹钟够不着的过渡)');
+const snap = JSON.stringify(rt());
+await Promise.all([send({type:'RECONCILE'}), send({type:'RECONCILE'})]); await settle();
+ok(JSON.stringify(rt())===snap, '多个标签页同时推 → 幂等,状态不变');
+NOW = rt().breakEndsAt;
+await send({type:'BREAK_FINISHED', reason:'completed', ideaId:rt().currentIdeaId}); await settle();
+
 console.log('\n── settings 变更 ─────────────────────────');
 const beforeFire = rt().nextFireAt;
 await chrome.storage.sync.set({settings:{...(mem.sync.settings||{}), intervalMinutes:5}});

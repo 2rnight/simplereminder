@@ -62,6 +62,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       )).then(() => sendResponse({ ok: true }));
       return true;                                   // 保持通道等异步回复
 
+    // ⭐ 页面侧到点推一把。预告 8 秒 / 休息 20 秒都短于 alarm 的 30 秒下限,
+    // 闹钟管不了这两个过渡,由看得见倒计时的那一方来触发。
+    // applyTransition 是幂等的,多个标签页同时推也只生效一次。
+    case 'RECONCILE':
+      queue(() => applyTransition(reconcileState, 'page-tick')).then(() => sendResponse({ ok: true }));
+      return true;
+
     case 'POSTPONE':
       queue(() => applyTransition(postponeState, 'postpone')).then(() => sendResponse({ ok: true }));
       return true;

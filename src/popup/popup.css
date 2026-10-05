@@ -93,13 +93,14 @@ body {
 /* ───────────────────────────── 参数 ───────────────────────────────────── */
 
 .fields {
-  display: flex; gap: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px 10px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 .fields label {
   display: flex; align-items: center; gap: 6px;
-  flex: 1;
   color: var(--fg-dim);
 }
 .fields input {

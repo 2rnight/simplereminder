@@ -31,8 +31,14 @@
     <input type="number" id="duration" min="5" max="600" step="5" inputmode="numeric">
     <span class="unit">秒</span>
   </label>
+  <label>
+    <span>预告</span>
+    <input type="number" id="prenotice" min="0" max="60" step="1" inputmode="numeric">
+    <span class="unit">秒</span>
+  </label>
 </div>
 <p class="hint" id="preview" hidden></p>
+<p class="hint" id="prenoticeHint" hidden>预告设为 0 就没有延迟的机会了 —— 到点直接全屏。</p>
 
 <!-- 动作 -->
 <div class="actions">

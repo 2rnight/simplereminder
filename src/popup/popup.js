@@ -26,6 +26,7 @@ let ticker = 0;
   [settings, runtime] = await Promise.all([getSettings(), getRuntime()]);
   renderIdeas();
   renderFields();
+  renderPrenoticeHint();
   render();
 
   // 每秒重画状态行。popup 关掉就销毁了,不存在泄漏问题。
@@ -127,6 +128,7 @@ async function onToggleIdea(id) {
 function renderFields() {
   $('interval').value = String(settings.intervalMinutes);
   $('duration').value = String(settings.durationSeconds);
+  $('prenotice').value = String(settings.preNoticeSeconds);
   renderPreview();
 }
 
@@ -138,7 +140,13 @@ function renderPreview() {
   if (show) $('preview').textContent = `间隔 ${n} 分钟 → 一天大约 ${dailyCount(n)} 次提醒`;
 }
 
+/** 预告是「延迟」的唯一入口,设成 0 等于放弃延迟。这个代价必须说出来。 */
+function renderPrenoticeHint() {
+  $('prenoticeHint').hidden = Number($('prenotice').value) !== 0;
+}
+
 $('interval').addEventListener('input', renderPreview);
+$('prenotice').addEventListener('input', renderPrenoticeHint);
 
 // 用 change 而不是 input 写入:边敲边存会把「2」当成一个完整值存进去,
 // 触发一次 reconcile 把周期重排到 2 分钟后
@@ -153,6 +161,13 @@ $('duration').addEventListener('change', async (e) => {
   const v = clamp(e.target.value, 5, 600, settings.durationSeconds);
   e.target.value = String(v);
   settings = await patchSettings({ durationSeconds: v });
+});
+
+$('prenotice').addEventListener('change', async (e) => {
+  const v = clamp(e.target.value, 0, 60, settings.preNoticeSeconds);
+  e.target.value = String(v);
+  settings = await patchSettings({ preNoticeSeconds: v });
+  renderPrenoticeHint();
 });
 
 function clamp(raw, min, max, fallback) {

@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS = {
  * @typedef {Object} RuntimeState
  * @property {'idle'|'prenotice'|'breaking'} phase
  * @property {number|null} nextFireAt       ⭐ 绝对时间戳 —— 预告该开始的时刻
+ * @property {number|null} prenoticeStartedAt ⭐ 绝对时间戳(预告进度线的分母)
  * @property {number|null} prenoticeEndsAt  ⭐ 绝对时间戳 —— 预告结束 = 休息开始
  * @property {number|null} breakStartedAt   ⭐ 绝对时间戳(进度条算分母用)
  * @property {number|null} breakEndsAt      ⭐ 绝对时间戳 —— 绝不存"剩余秒数"
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS = {
 export const DEFAULT_RUNTIME = {
   phase: 'idle',
   nextFireAt: null,
+  prenoticeStartedAt: null,
   prenoticeEndsAt: null,
   breakStartedAt: null,
   breakEndsAt: null,

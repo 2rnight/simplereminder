@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SimpleReminder · 预告条预览</title>
+<style>
+  /* ── 假网页(预览脚手架,不属于产品)──
+     浅色 + 有输入框 + 够长能滚动,三个要素都是为了暴露预告条的真实问题 */
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: #f6f7f9; color: #1f2328;
+         font: 15px/1.85 -apple-system, BlinkMacSystemFont, "PingFang SC",
+               "Microsoft YaHei", sans-serif; }
+
+  .top { position: sticky; top: 0; z-index: 9; height: 52px; background: #fff;
+         border-bottom: 1px solid #e4e7eb; display: flex; align-items: center;
+         gap: 20px; padding: 0 22px; }
+  .logo { width: 26px; height: 26px; border-radius: 7px;
+          background: linear-gradient(135deg,#6c8cff,#4a6cf7); }
+  .top b { font-size: 14px; } .top span { font-size: 14px; color: #5c6670; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 30px 22px 90px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -.3px; }
+  .meta { font-size: 13px; color: #8b949e; margin-bottom: 22px; }
+  p { margin: 0 0 15px; color: #3d454d; }
+  textarea { width: 100%; min-height: 92px; padding: 11px 13px; font: inherit;
+             font-size: 14px; border: 1px solid #d7dce2; border-radius: 9px;
+             resize: vertical; background: #fff; }
+
+  .panel { position: fixed; right: 16px; bottom: 16px; z-index: 10;
+           display: grid; gap: 7px; width: 228px; padding: 13px;
+           background: #1d1710; color: #fff; border-radius: 11px;
+           box-shadow: 0 16px 40px rgba(0,0,0,.38);
+           font: 12px/1.5 -apple-system, "PingFang SC", sans-serif; }
+  .panel h4 { margin: 0; font-size: 10px; letter-spacing: .14em;
+              text-transform: uppercase; color: rgba(255,255,255,.4); font-weight: 600; }
+  .panel button { font: inherit; cursor: pointer; padding: 7px 9px; border-radius: 6px;
+                  color: #fff; background: rgba(255,255,255,.1);
+                  border: 1px solid rgba(255,255,255,.16); }
+  .panel button:hover { background: rgba(255,255,255,.17); }
+  .panel .row { display: flex; gap: 6px; } .panel .row button { flex: 1; }
+  .panel code { color: #e8a33d; font-family: ui-monospace, monospace; }
+  .panel .log { color: rgba(255,255,255,.5); min-height: 2.4em; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="logo"></div><b>概览</b><span>任务</span><span>文档</span><span>报表</span>
+</header>
+
+<main>
+  <h1>预告条预览</h1>
+  <div class="meta">这是真的 <code>content.js</code> 跑在假的 chrome API 上,不是截图。</div>
+
+  <p>预告条会从页面顶端滑下来,压在这个假网页最上方。它用的是原生
+  <code>popover="manual"</code> —— <b>非模态</b>,所以页面仍然可以滚动、可以点、可以输入。</p>
+
+  <p>试这几件事:<b>①</b> 按空格 → 延迟(页面不会跟着滚一屏)。
+  <b>②</b> 点预告条本身 → 同样是延迟。
+  <b>③</b> 把光标放进下面的输入框再打字 → 自动延迟,并且条上会告诉你它干了什么。</p>
+
+  <textarea placeholder="把光标放进来,然后在预告条出现时打字 —— 它应该自动延后并说出来"></textarea>
+
+  <p style="margin-top:22px">底边那条细线是剩余时间,和休息屏里的进度条是同一套语言:
+  <b>递减表示剩余</b>,不是递增表示已用。</p>
+  <p>连续点两次以上「延迟」,条上会出现 <code>已延迟 ×2</code> 角标 ——
+  第 1 次不显示,因为「×1」没有信息量。</p>
+</main>
+
+<div class="panel">
+  <h4>预览控制 · 不属于产品</h4>
+  <button id="show">显示预告条(8 秒)</button>
+  <div class="row">
+    <button id="loop">循环:开</button>
+    <button id="reset">重置计数</button>
+  </div>
+  <div class="log" id="log">等待…</div>
+</div>
+
+<script type="module">
+/* ── 假 chrome API ───────────────────────────────────────────────────────
+   只提供 content.js 真正用到的那几个面:storage.local 的读与变更订阅、
+   runtime.getURL、runtime.sendMessage。背后那套"谁决定下一次"的逻辑
+   在这里由下面几行模拟 background 的代码顶替。 */
+let runtime = {
+  phase: 'idle', nextFireAt: null,
+  prenoticeStartedAt: null, prenoticeEndsAt: null,
+  breakStartedAt: null, breakEndsAt: null,
+  currentIdeaId: 'stand', postponeCount: 0, pausedUntil: null, ideaBag: [],
+};
+const listeners = [];
+const log = (t) => { document.getElementById('log').textContent = t; };
+
+async function setRuntime(next) {
+  const old = runtime; runtime = next;
+  listeners.forEach((f) => f({ runtime: { oldValue: old, newValue: next } }, 'local'));
+}
+
+window.chrome = {
+  runtime: {
+    id: 'preview',
+    // content.js 会拿它建 break.html 的 iframe。预览里不演遮罩,
+    // 指到 about:blank 免得那份 break.js 因为没有 chrome API 而报错。
+    getURL: (p) => (p.includes('ideas') ? new URL('../src/lib/ideas.js', location.href).href
+                                        : 'about:blank'),
+    async sendMessage(msg) {
+      if (msg.type === 'POSTPONE' && runtime.phase === 'prenotice') {
+        log(`延迟 5 分钟 · 累计 ${runtime.postponeCount + 1} 次`);
+        await setRuntime({ ...runtime, phase: 'idle',
+                           prenoticeStartedAt: null, prenoticeEndsAt: null,
+                           postponeCount: runtime.postponeCount + 1 });
+        if (looping) setTimeout(show, 2600);
+      }
+      if (msg.type === 'RECONCILE' && runtime.phase === 'prenotice') {
+        log('预告走完 → 这里本该盖上遮罩(看 break-stand.html)');
+        await setRuntime({ ...runtime, phase: 'idle',
+                           prenoticeStartedAt: null, prenoticeEndsAt: null,
+                           postponeCount: 0 });
+        if (looping) setTimeout(show, 2200);
+      }
+    },
+  },
+  storage: {
+    local: { async get() { return { runtime }; } },
+    onChanged: { addListener: (f) => listeners.push(f) },
+  },
+};
+
+/* ── 真的 content.js ── */
+await import('../src/content.js');
+
+/* ── 预览控制 ── */
+let looping = true;
+async function show() {
+  const now = Date.now();
+  log('预告中 · 按空格 / 点条 / 在输入框打字');
+  await setRuntime({ ...runtime, phase: 'prenotice',
+                     prenoticeStartedAt: now, prenoticeEndsAt: now + 8000 });
+}
+document.getElementById('show').addEventListener('click', show);
+document.getElementById('reset').addEventListener('click', async () => {
+  await setRuntime({ ...runtime, postponeCount: 0 }); log('延迟计数已归零');
+});
+document.getElementById('loop').addEventListener('click', (e) => {
+  looping = !looping;
+  e.target.textContent = `循环:${looping ? '开' : '关'}`;
+});
+setTimeout(show, 700);
+</script>
+</body>
+</html>

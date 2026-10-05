@@ -25,11 +25,13 @@ r = reconcileState(T0+20*MIN, S(), r.rt, {random:rnd});
 ok(r.rt.phase==='prenotice', '到点 → 进预告');
 ok(r.rt.currentIdeaId!==null, '预告时已抽好内容(background 决定,不是页面)');
 ok(r.rt.prenoticeEndsAt===T0+20*MIN+8000, '预告 8 秒');
+ok(r.rt.prenoticeStartedAt===T0+20*MIN, '写下 prenoticeStartedAt(预告进度线的分母)');
 const ideaA = r.rt.currentIdeaId;
 
 const t2 = T0+20*MIN+8000;
 r = reconcileState(t2, S(), r.rt);
 ok(r.rt.phase==='breaking', '预告结束 → 进休息');
+ok(r.rt.prenoticeStartedAt===null && r.rt.prenoticeEndsAt===null, '预告的时间戳清理干净');
 ok(r.rt.breakEndsAt-r.rt.breakStartedAt===20000, '休息 20 秒');
 ok(r.rt.currentIdeaId===ideaA, '内容没变');
 
