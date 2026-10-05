@@ -8,7 +8,8 @@
 
 ## 当前状态
 
-**产品与技术方案已封板,尚未开工。**
+**可以装进 Chrome 跑了** —— 遮罩链路已打通(实现顺序 7 步中的第 1、2 步完成)。
+调度器还没做,所以目前只能手动触发:**点工具栏图标 = 立即休息一次。**
 
 | 文档 | 内容 |
 |---|---|
@@ -29,7 +30,31 @@
 | MV3 Service Worker 被回收 | **Storage 是真相源**,`chrome.alarms` 只是叫醒服务;幂等 `reconcile()` 自愈补偿 |
 | 多标签页各自随机导致双屏显示不同内容 | **每次休息只决定一次的事,一律在 background 决定并写 storage**;iframe 只是显示器 |
 
-**技术栈:** WXT · React · Tailwind v4 · `chrome.alarms` + `chrome.idle` · 原生 `<dialog>` / `popover`
+**技术栈:** 原生 MV3,零构建 · JSDoc + `@ts-check` · `chrome.alarms` + `chrome.idle` · 原生 `<dialog>` / `popover`
+(封板时选的是 WXT + React + Tailwind,实现阶段改为原生 —— 理由见
+[ARCHITECTURE §1.1](docs/ARCHITECTURE.md#11-偏离记录wxt--react--tailwind--原生零构建))
+
+---
+
+## 安装(开发版)
+
+不需要 `npm install`,没有构建步骤。
+
+1. 打开 `chrome://extensions`
+2. 右上角打开「**开发者模式**」
+3. 点「**加载已解压的扩展程序**」,选这个仓库的根目录
+4. 随便打开一个网页,**点一下工具栏里的 SimpleReminder 图标**
+
+应该立刻全屏盖上一层休息屏,20 秒后自动消失。
+**按住「按住跳过」一秒**,或者**按住 `Esc` 一秒**,可以提前结束。
+
+> 遮罩盖不住 `chrome://` 开头的页面、Chrome 应用商店和 PDF 阅读器 ——
+> 这是 Chrome 的限制,不是 bug。见 [ARCHITECTURE §9](docs/ARCHITECTURE.md)。
+
+### 想单独调这一屏的视觉
+
+`demo/break-stand.html` 是不接任何扩展逻辑的单文件原型,浏览器直接打开即可,
+按 `D` 调出参数面板。
 
 ---
 
@@ -50,7 +75,7 @@
 
 ## 下一步
 
-先只做一件事:**把 `break.html` 这一屏单独做出来**(普通网页,不接扩展逻辑),
-浏览器直接打开,把暗度、排版、倒计时、渐暗曲线调到满意。
+**第 3 步:`background.js` 的 `reconcile()` + 单一 `next-wake` alarm。**
 
-这一屏定了,剩下的都是管道工程。
+现在的 background 是个最小可测版本 —— 会抽内容、会埋点、会按正常间隔重排,
+但**没有闹钟**,所以不会自己响。接上调度器之后,它才真的成为一个节拍器。

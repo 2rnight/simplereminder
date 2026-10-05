@@ -9,13 +9,33 @@
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 框架 | **WXT** | Vite · 活跃维护 · 框架无关 |
-| UI | React(`@wxt-dev/module-react`) | 仅用于 `break.html` / popup,content script 不需要 |
-| 样式 | Tailwind v4 | **在 iframe 内是普通网页,无任何 Shadow DOM 兼容问题** |
-| 存储 | `wxt/storage`(封装 `chrome.storage`) | sync / local 分家,见 §5 |
+| 框架 | **无 · 原生 MV3,零构建** | v0.1 实测修正,见下方「§1.1 偏离记录」 |
+| UI | 原生 HTML / CSS | `break.html` 与 popup 都是静态页;content script 本就是无 UI 胶水 |
+| 类型 | JSDoc + `// @ts-check` | 不引入编译步骤的前提下保住数据模型的类型约束 |
+| 存储 | 自写 `src/lib/storage.js` | sync / local 分家,见 §5 |
 | 调度 | `chrome.alarms` | 单一 `next-wake` 闹钟 |
 | 遮罩层级 | 原生 `<dialog>.showModal()` → Top Layer | 不用任何 UI 库 |
 | 预告层级 | 原生 `popover` + `showPopover()` → Top Layer(非模态) | 同上 |
+
+### 1.1 偏离记录:WXT + React + Tailwind → 原生零构建
+
+封板时选的是 **WXT + React + Tailwind v4**。进入实现后改为原生,理由:
+
+1. **`break.html` 已经用原生 HTML/CSS/JS 调完视觉并通过验收**,重写成 React 是
+   拿已确定的东西去换不确定性,零收益。
+2. **content script 文档自己定义为「无 UI 胶水」** —— 它的工作是 shadow root、
+   `<dialog>`、iframe 生命周期和 Top Layer 抢夺,React 在这里一点忙帮不上。
+3. **Tailwind 的价值前提是「要写很多组件」**。v0.1 一共 1 个全屏页 + 1 个 popup,
+   CSS 总量两百行,工具链的维护成本高于它省下的。
+4. **零构建 = `load unpacked` 直接装**,自用阶段不需要 `npm install`、
+   不需要 dev server、仓库里没有 `node_modules`。
+
+**代价与退路:** 失去 HMR、TS 编译期检查、跨浏览器打包。目录结构刻意照 WXT 的
+约定摆(`src/background.js` / `src/content.js` / `src/break/` / `src/lib/`),
+将来若 UI 复杂度真的上来,迁 WXT 基本是平移加一份 `wxt.config.ts`。
+
+**这个决定在以下情况应当推翻:** 要做 options 页和统计图表(组件数量上去了)、
+或要同时发 Firefox(需要跨浏览器 manifest 生成)。
 
 ---
 
@@ -224,6 +244,7 @@ content script 在**每个标签页各跑一份**。若让 `break.html` 自己�
 {
   phase: 'idle' | 'prenotice' | 'breaking',
   nextFireAt: 1759564800000,
+  breakStartedAt: null,           // ⭐ 绝对时间戳 —— 进度条的分母
   breakEndsAt: null,              // ⭐ 绝对时间戳
   currentIdeaId: null,            // ⭐ background 抽,全窗口共享
   postponeCount: 0,               // ⭐
@@ -260,33 +281,51 @@ BreakIdea {
   emoji: '🧍',
   action: { zh: '站起来,走两步', en: '' },   // i18n 结构 v0.1 就留好
   hint:   { zh: '让腰背松一松',   en: '' },   // 允许为空
-  color: '#8B5A2B',
+  bg:     '32 38% 8%',                        // 遮罩底色,HSL 三元组
+  accent: '#e8a33d',                          // 进度环等强调色
   animation?: 'stand-up',                     // v0.2
 }
 ```
+
+原本是单个 `color` 字段。实现时发现遮罩需要**两个**色值:大面积的深色背景
+和小面积的高亮强调色,二者不是同一个色阶上的点,派生不出来,故拆成
+`bg` / `accent`。`bg` 写成 HSL 三元组是为了能直接塞进 `hsl(var(--bg))`。
 
 **无 `category` 字段** —— 3 条谈不上批量操作,主题色/动画直接挂条目上。
 **无 `minSeconds` 字段** —— 遮罩是触发器不是容器,改为撰稿规范约束。
 
 ---
 
-## 6. 目录结构(WXT)
+## 6. 目录结构
 
 ```
-entrypoints/
-  background.ts        reconcile() · 单 alarm · idle 监听 · badge · 通知兜底
-  content.ts           无 UI 胶水:订阅 storage → 管 popover / dialog / iframe 生命周期
-  break/index.html     ⭐ 遮罩本体,标准 React 页面(iframe 内)
-  popup/index.html     倒计时 · 勾选 · 间隔时长 · 立即休息 · 暂停
-lib/
-  scheduler.ts         reconcile · 洗牌袋 · 抑制条件判定
-  storage.ts           Settings / RuntimeState / Stats 的读写封装
-  ideas.ts             内置 3 条内容
+manifest.json
+src/
+  background.js        reconcile() · 单 alarm · idle 监听 · badge · 通知兜底
+  content.js           无 UI 胶水:订阅 storage → 管 popover / dialog / iframe 生命周期
+  break/
+    break.html         ⭐ 遮罩本体(iframe 内的扩展页面)
+    break.css
+    break.js
+  popup/               倒计时 · 勾选 · 间隔时长 · 立即休息 · 暂停(第 6 步)
+  lib/
+    storage.js         Settings / RuntimeState / Stats 的读写封装 + 默认值
+    ideas.js           内置 3 条内容
+    scheduler.js       reconcile · 洗牌袋 · 抑制条件判定(第 3 步拆出)
+demo/
+  break-stand.html     调视觉用的单文件原型,不属于扩展
 docs/
   PRODUCT.md  ARCHITECTURE.md
 ```
 
-`break/index.html` 需声明进 `web_accessible_resources`。
+**`web_accessible_resources` 必须同时包含 `src/break/*` 和 `src/lib/*`** ——
+`break.html` 是 ES module,它 `import` 的 `lib/` 文件是独立的子资源请求,
+漏掉 `lib/*` 会在某些加载路径下被拦住。
+
+⚠️ content script 是**传统脚本,不支持 `import`**(MV3 不允许
+`"type": "module"` 的 content script)。所以 `src/content.js` 必须自包含,
+它用到的 storage key 是手写常量,与 `lib/storage.js` 重复定义 —— 改 key
+时两边都要改。
 
 ---
 
@@ -338,11 +377,22 @@ docs/
 
 ## 10. 实现顺序
 
-1. **`break.html` 单独成页** —— 不接任何扩展逻辑,浏览器直接打开调视觉
-   (暗度 / 排版 / 大倒计时 / 渐暗曲线 / 长按进度环)
-2. content script:`<dialog>` + iframe 挂载、`showModal`、Top Layer 抢回、自愈 observer
-3. `background.ts`:`reconcile()` + 单 alarm + 状态机
-4. 预告条 `popover` + 空格延迟 + 输入中自动延迟
-5. idle 检测 + 暂停 + badge
-6. popup
-7. 埋点
+1. ✅ **`break.html` 单独成页** —— 不接任何扩展逻辑,浏览器直接打开调视觉
+   (暗度 / 排版 / 进度条 / 渐暗曲线 / 长按进度环)。原型见 `demo/break-stand.html`
+2. ✅ **content script**:`<dialog>` + iframe 挂载、`showModal`、Top Layer 抢回、自愈 observer
+3. ⬜ **`background.js`**:`reconcile()` + 单 alarm + 状态机
+   *(当前只有最小可测版:点图标立即休息 + 结束上报 + 洗牌袋 + 埋点,没有 alarm)*
+4. ⬜ 预告条 `popover` + 空格延迟 + 输入中自动延迟
+5. ⬜ idle 检测 + 暂停 + badge
+6. ⬜ popup
+7. ⬜ 埋点展示(记录已在第 2 步随手做掉)
+
+### 第 2 步落地时确认的事实
+
+| 事实 | 影响 |
+|---|---|
+| **宿主节点不能 `display:none`** | 祖先 `display:none` 会把子树移出盒树,**Top Layer 也救不回来**,dialog 根本不渲染。改用 `position:fixed` + 0 尺寸 |
+| **dialog 不要用 `100vw/100vh`** | `100vw` 含滚动条宽度,在有滚动条的页面会撑出横向滚动。用 `position:fixed; inset:0` 精确等于视口 |
+| **Esc 要在两个文档里都拦** | 焦点通常在 iframe 内(由 `break.js` 处理),但也可能留在宿主文档,`content.js` 需兜底 |
+| **抢回 Top Layer 必须掐掉动画** | `close()`+`showModal()` 会重放入场动画,需临时加 `.sr-noanim` |
+| **iframe 要等 `load` 再 `showModal`** | 否则先闪一下空白框。给 400ms 兜底,并让 dialog 底色与 `break.html` 一致 |

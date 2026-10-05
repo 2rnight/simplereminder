@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>休息一下</title>
+<link rel="stylesheet" href="break.css">
+</head>
+<!--
+  这个文档运行在 <iframe src="chrome-extension://…/break.html"> 里,
+  由 content.js 装进宿主页的 <dialog> 中。
+
+  MV3 扩展页面的 CSP 是 script-src 'self' —— 不能有内联 <script>,
+  所以脚本必须是独立文件(这与宿主页的 CSP 无关,Chrome 豁免扩展 iframe)。
+-->
+<body>
+
+<main class="stage">
+  <h1 class="title" id="title">站起来,走两步</h1>
+  <p class="sub" id="sub">让腰背松一松</p>
+
+  <div class="bar"><i id="fill"></i></div>
+  <div class="left" id="left" role="timer" aria-live="off">还有 20 秒</div>
+
+  <button class="skip" id="skip" type="button">
+    按住跳过
+    <svg viewBox="0 0 26 26" aria-hidden="true">
+      <circle class="trk" cx="13" cy="13" r="11"/>
+      <circle class="rng" id="ring" cx="13" cy="13" r="11" pathLength="100"/>
+    </svg>
+  </button>
+</main>
+
+<script type="module" src="break.js"></script>
+</body>
+</html>

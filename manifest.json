@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "SimpleReminder",
+  "version": "0.1.0",
+  "description": "一个节拍器:每隔一段时间,把一条休息动作全屏推到你面前。按住一秒可以跳过。",
+
+  "permissions": ["alarms", "storage", "idle", "notifications"],
+  "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["src/break/*", "src/lib/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+
+  "action": {
+    "default_title": "SimpleReminder · 点击立即休息(v0.1 临时入口)"
+  }
+}

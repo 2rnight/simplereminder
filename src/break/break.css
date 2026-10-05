@@ -1,0 +1,154 @@
+/* ============================================================================
+   SimpleReminder · 休息遮罩本体(iframe 内)
+   ----------------------------------------------------------------------------
+   版式参照 Stretchly:标题 → 副文案 → 细长进度条 → 剩余时间 → 底部跳过链接。
+   全屏几乎不用粗体,层级靠字号和留白拉开。
+   进度条是**递减**的(表示剩余量),不是递增。
+
+   注意:入场渐暗 / 出场淡出由 content.js 作用在宿主页的 <dialog> 上,
+   这里只负责内容本身的 stagger,不要重复做整屏淡入淡出。
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg:         32 38% 8%;      /* 由 break.js 按当前内容替换 */
+  --accent:     #e8a33d;
+  --accent-soft:#f3bf72;
+
+  --fade-in:    300ms;
+  --title-size: 52px;
+  --sub-size:   24px;
+  --bar-w:      38vw;
+  --ease:       cubic-bezier(.22,.61,.36,1);
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;    /* 别把滚动链传给宿主页 */
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+               "Noto Sans SC", sans-serif;
+  background: hsl(var(--bg));
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+@keyframes content-in {
+  from { opacity: 0; transform: translateY(8px) }
+  to   { opacity: 1; transform: none }
+}
+
+.stage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24vh 24px 9vh;
+  text-align: center;
+  animation: content-in calc(var(--fade-in) + 140ms) var(--ease) both;
+  animation-delay: 60ms;
+}
+
+.title {
+  font-size: var(--title-size);
+  font-weight: 300;
+  letter-spacing: .02em;
+  line-height: 1.25;
+  margin: 0;
+  color: rgba(255,255,255,.95);
+}
+
+/* 副文案(Stretchly 的 body 位) */
+.sub {
+  font-size: var(--sub-size);
+  font-weight: 300;
+  letter-spacing: .04em;
+  line-height: 1.5;
+  margin: 4.5vh 0 0;
+  color: rgba(255,255,255,.62);
+}
+.sub.off { display: none; }       /* hint 为空的条目(如「去接杯水」) */
+
+/* 细长进度条:用 transform:scaleX 递减,比改 width 便宜得多 */
+.bar {
+  width: var(--bar-w);
+  max-width: 560px;
+  height: 7px;
+  border-radius: 4px;
+  margin-top: 9vh;
+  overflow: hidden;
+  background: rgba(255,255,255,.16);
+}
+.bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(255,255,255,.88);
+  transform-origin: left center;
+  transform: scaleX(1);
+}
+
+.left {
+  margin-top: 17px;
+  font-size: 16px;
+  font-weight: 300;
+  letter-spacing: .03em;
+  color: rgba(255,255,255,.58);
+  font-variant-numeric: tabular-nums;   /* 数字跳动时宽度不抖 */
+}
+
+/* 跳过:无边框文字 + 26px 小圆进度环 */
+.skip {
+  margin-top: auto;                     /* 推到底部 */
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 300;
+  letter-spacing: .03em;
+  color: rgba(255,255,255,.52);
+  background: none;
+  border: 0;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: color .2s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.skip:hover   { color: rgba(255,255,255,.82); }
+.skip.holding { color: var(--accent-soft); }
+
+/* 焦点环只在用户真的用 Tab 导航时才出现。
+   :focus-visible 取决于浏览器的「输入模态」—— 按过 Esc 之后模态切到键盘,
+   下次聚焦就会画环。用 body.kbd 这个显式闸门取代浏览器的启发式判定。 */
+.skip:focus,
+.skip:focus-visible          { outline: none; }
+body.kbd .skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 8px; border-radius: 22px; }
+
+.skip svg { width: 26px; height: 26px; overflow: visible; display: block; }
+.skip .trk { fill: none; stroke: currentColor; stroke-width: 1.4; opacity: .42; }
+/* 圆形用 rotate(-90deg) 是安全的 —— 旋转不改变圆的外形。
+   (早期版本在 184×50 的矩形上这么干,会转成 50×184 戳出按钮外。) */
+.skip .rng {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transform: rotate(-90deg);
+  transform-origin: 13px 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage { animation: none !important; }
+}
