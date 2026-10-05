@@ -5,7 +5,14 @@
   "description": "一个节拍器:每隔一段时间,把一条休息动作全屏推到你面前。按住一秒可以跳过。",
   "minimum_chrome_version": "114",
 
-  "permissions": ["alarms", "storage", "idle", "notifications", "scripting"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "permissions": ["alarms", "storage", "idle", "scripting"],
   "host_permissions": ["<all_urls>"],
 
   "background": {
@@ -31,6 +38,12 @@
 
   "action": {
     "default_title": "SimpleReminder",
-    "default_popup": "src/popup/popup.html"
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }
