@@ -333,7 +333,7 @@ docs/
 
 ```jsonc
 {
-  "permissions": ["alarms", "storage", "idle", "notifications"],
+  "permissions": ["alarms", "storage", "idle", "notifications", "scripting"],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [
     { "resources": ["break.html", "assets/*"], "matches": ["<all_urls>"] }
@@ -341,6 +341,8 @@ docs/
 }
 ```
 
+- `scripting` 用途单一:**给安装 / 更新时已经开着的标签页补注入 content script**。
+  Chrome 只在页面加载时注入声明式 content script,不补注入已有标签页
 - `<all_urls>` 是审核重点,理由写清:**「注入休息覆盖层,不读取任何页面内容」**
 - **初版就按上架标准申请**,别先 optional 再改(改权限模型要重新过审)
 
@@ -396,3 +398,7 @@ docs/
 | **Esc 要在两个文档里都拦** | 焦点通常在 iframe 内(由 `break.js` 处理),但也可能留在宿主文档,`content.js` 需兜底 |
 | **抢回 Top Layer 必须掐掉动画** | `close()`+`showModal()` 会重放入场动画,需临时加 `.sr-noanim` |
 | **iframe 要等 `load` 再 `showModal`** | 否则先闪一下空白框。给 400ms 兜底,并让 dialog 底色与 `break.html` 一致 |
+| ⭐ **已打开的标签页拿不到 content script** | Chrome 只在页面**加载时**注入声明式 content script;安装/更新不是导航。症状:装完后新开的页面正常,之前开着的页面毫无反应。必须在 `onInstalled` 用 `scripting.executeScript` 自己补注入 |
+| ⭐ **「重新启用扩展」不触发 `onInstalled`** | 只能在 worker 启动时用 `chrome.storage.session` 的版本标记兜底(session 随浏览器会话清空) |
+| ⭐ **扩展重载后旧 content script 仍活着** | 同一扩展的 content script 共享一个 isolated world,旧实例的全局变量还在,但 `chrome.*` 已失效("Extension context invalidated")。用版本号判重挡不住,必须让新实例调用旧实例暴露的 `__SR_TEARDOWN__` 把监听器摘干净 |
+| **page CSP 管不到我们的 iframe** | 已确认:宿主页的 `frame-src` 只约束指向**外部站点**的 iframe,指向 `chrome-extension://` 的 web-accessible resource 不受约束。Google 这类 CSP 很严的站点同样正常 |

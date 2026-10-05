@@ -27,6 +27,7 @@ import { getSettings, getRuntime, patchRuntime, bumpStat, DEFAULT_RUNTIME } from
 chrome.runtime.onInstalled.addListener(async () => {
   // 启动即落一份干净的运行时状态,避免上一次安装的残留把遮罩钉死
   await chrome.storage.local.set({ runtime: { ...DEFAULT_RUNTIME } });
+  await injectIntoOpenTabs();
 
   // PRODUCT:首次安装必须立刻演示一次 overlay。
   // 真实差评佐证 ——「点图标什么都没有…他们不会等 20 分钟」。
@@ -39,6 +40,58 @@ chrome.runtime.onStartup.addListener(async () => {
   // 永远不会结束的遮罩盖住
   if (rt.phase === 'breaking') await endBreak(null, 'stale');
 });
+
+/* ═══════════════ 补注入已打开的标签页 ═══════════════════════════════════
+   ⭐ Chrome **只在页面加载时**注入 manifest 声明的 content script。
+   安装 / 更新时已经开着的标签页不会被注入,直到它们发生导航 ——
+   症状就是「刚装完,新开的标签页正常,之前开着的标签页毫无反应」。
+   Chrome 不自动补注入是刻意的(往任意已有页面里塞脚本可能把页面搞坏),
+   它把这个决定留给扩展自己。
+
+   注意「重新启用扩展」不会触发 onInstalled,所以还要在 worker 启动时
+   用一个 session 级标记兜底(session storage 随浏览器会话清空)。
+   ===================================================================== */
+
+const INJECT_MARK = 'injectedVersion';
+
+async function injectIntoOpenTabs() {
+  const version = chrome.runtime.getManifest().version;
+
+  let tabs;
+  try { tabs = await chrome.tabs.query({}); } catch { return; }
+
+  // 活动标签页优先 —— 用户正盯着的那个先恢复
+  tabs.sort((a, b) => Number(b.active) - Number(a.active));
+
+  for (const tab of tabs) {
+    // 跳过已丢弃的标签页:注入会失败,或者把它唤醒,白白耗内存
+    if (!tab.id || tab.discarded) continue;
+    // chrome:// / 应用商店 / PDF 阅读器注不进去,这是 Chrome 的限制
+    if (!/^https?:/i.test(tab.url || '')) continue;
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: false },
+        files: ['src/content.js'],
+      });
+    } catch {
+      // 单个标签页失败不能影响其它标签页(可能是受限页面或刚好在导航)
+    }
+  }
+
+  try { await chrome.storage.session.set({ [INJECT_MARK]: version }); } catch { /* noop */ }
+}
+
+// worker 每次启动都检查一次。storage.session 在同一浏览器会话内跨 worker
+// 重启保留,所以正常情况下只会真正注入一次。
+(async () => {
+  try {
+    const got = await chrome.storage.session.get(INJECT_MARK);
+    if (got[INJECT_MARK] !== chrome.runtime.getManifest().version) {
+      await injectIntoOpenTabs();
+    }
+  } catch { /* noop */ }
+})();
 
 /* ──────────────────── 临时触发入口:点工具栏图标 = 立即休息 ───────────────
    第 6 步 popup 做好后会被「立即休息」按钮取代。 */

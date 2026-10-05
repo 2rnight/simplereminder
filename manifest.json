@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "一个节拍器:每隔一段时间,把一条休息动作全屏推到你面前。按住一秒可以跳过。",
 
-  "permissions": ["alarms", "storage", "idle", "notifications"],
+  "permissions": ["alarms", "storage", "idle", "notifications", "scripting"],
   "host_permissions": ["<all_urls>"],
 
   "background": {

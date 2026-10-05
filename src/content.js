@@ -25,9 +25,22 @@
 (() => {
   'use strict';
 
-  // 同一文档只注入一次(扩展热重载 / 重复注入时的保险)
-  if (window.__SIMPLEREMINDER_CS__) return;
-  window.__SIMPLEREMINDER_CS__ = true;
+  /* 幂等注入。
+     本脚本有两条进入路径:manifest 声明式注入(页面加载时),以及
+     background 的 scripting.executeScript 补注入(装完扩展时已经开着的
+     标签页拿不到声明式注入)。两条路可能都命中同一个文档。
+
+     同一扩展的 content script 共享一个 isolated world,所以扩展重载后
+     旧实例的全局变量还在,但它的 chrome.* 已经失效("Extension context
+     invalidated")。用版本号判重挡不住这种情况 —— 让新实例主动把旧实例
+     拆干净才是对的。 */
+  try { window.__SR_TEARDOWN__?.(); } catch { /* 旧实例已失效,忽略 */ }
+
+  /** 扩展上下文是否还活着。重载 / 卸载后 chrome.runtime.id 会变成 undefined
+      或直接抛异常,此时任何 chrome.* 调用都会报错。 */
+  const alive = () => {
+    try { return !!chrome.runtime?.id; } catch { return false; }
+  };
 
   const RT_KEY    = 'runtime';
   const BREAK_URL = chrome.runtime.getURL('src/break/break.html');
@@ -265,13 +278,18 @@
     else hideOverlay();
   }
 
-  chrome.storage.onChanged.addListener((changes, area) => {
+  function onStorageChanged(changes, area) {
+    if (!alive()) { teardown(); return; }
     if (area !== 'local' || !changes[RT_KEY]) return;
     apply(changes[RT_KEY].newValue);
-  });
+  }
+  chrome.storage.onChanged.addListener(onStorageChanged);
 
-  // 首次注入时对齐一次 —— 休息中途打开的新标签页也要立刻盖上
-  chrome.storage.local.get(RT_KEY).then((got) => apply(got[RT_KEY]));
+  // 首次注入时对齐一次 —— 休息中途打开的新标签页、以及被补注入的旧标签页,
+  // 都要立刻和真相源对齐,而不是干等下一次 onChanged
+  chrome.storage.local.get(RT_KEY)
+    .then((got) => apply(got[RT_KEY]))
+    .catch(() => { /* 上下文已失效 */ });
 
   /* ========================================================================
      iframe → content script 的即时信号
@@ -281,10 +299,26 @@
      (冷启动可能 100~200ms,长按走满后干等那么久会觉得卡住)。
      它不参与任何状态决定,丢了也不影响正确性。
      ====================================================================== */
-  window.addEventListener('message', (e) => {
+  function onIframeMessage(e) {
     if (!iframe || e.source !== iframe.contentWindow) return;
     const d = e.data;
     if (!d || d.__sr !== 1) return;
     if (d.type === 'FINISH') hideOverlay();
-  });
+  }
+  window.addEventListener('message', onIframeMessage);
+
+  /* ========================================================================
+     拆卸
+     ------------------------------------------------------------------------
+     暴露给**下一个**注入实例调用。没有它的话,扩展重载后页面上会同时存在
+     两份监听器,而旧那份的 chrome.* 全是坏的。
+     ====================================================================== */
+  function teardown() {
+    wantOpen = false;
+    try { chrome.storage.onChanged.removeListener(onStorageChanged); } catch { /* noop */ }
+    window.removeEventListener('message', onIframeMessage);
+    unmount();
+    try { delete window.__SR_TEARDOWN__; } catch { /* noop */ }
+  }
+  window.__SR_TEARDOWN__ = teardown;
 })();
