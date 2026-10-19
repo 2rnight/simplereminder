@@ -24,6 +24,7 @@ import {
   setIdleState, badgeFor, assertAlive,
   ALARM_NAME, PAUSE_FOREVER,
 } from './lib/scheduler.js';
+import { IDEA_BY_ID, DEFAULT_IDEA } from './lib/ideas.js';
 
 /** badge 的分钟级心跳。和 next-wake 分开两个闹钟:
     一个管正确性(必须准),一个管好看(可以丢)。 */
@@ -53,6 +54,65 @@ async function mediaFresh() {
   } catch { return false; }
 }
 
+/* ═══════════════════ 系统通知兜底(焦点不在浏览器)═════════════════════
+   遮罩只盖得住浏览器窗口。用户在 IDE / PS 里写代码时(键鼠一直在动,
+   chrome.idle 认为人「在」),浏览器窗口没有焦点,遮罩开了也没人看见 ——
+   到点弹一条 OS 系统通知把人叫回来,点击通知把浏览器带回前台。
+
+   发 / 不发的边界(宁可漏发,不双重打扰):
+     · 焦点在浏览器,且活动标签页是普通网页 → 不发,遮罩自己会盖上去;
+     · 焦点不在浏览器 → 发;
+     · 人在浏览器,但活动标签页是 chrome:// 这类注入不进去的页面
+       (遮罩在那儿出不来)→ 也发,这本来就是通知要兜的硬边界;
+     · 离开期间(idleSince 非空)到点 → **不发** —— 回来那一下会整轮
+       重排(「已经休息过了」),通知会睁眼说瞎话。
+   休息一旦结束(完成/跳过/暂停/离开重排),过期通知立即清掉。 */
+const BREAK_NOTIF_ID = 'break-due';
+
+/** 遮罩此刻是否真的盖得住用户视野。拿不到信息就信遮罩(不双重打扰)。 */
+async function overlayCanCover() {
+  try {
+    const w = await chrome.windows.getLastFocused();
+    if (!w?.focused) return false;
+    const tabs = await chrome.tabs.query({ active: true, windowId: w.id });
+    return /^https?:/i.test(tabs[0]?.url || '');
+  } catch { return true; }
+}
+
+/** @param {any} rt */
+async function notifyBreakDue(rt) {
+  const idea = IDEA_BY_ID[rt.currentIdeaId || ''] || DEFAULT_IDEA;
+  try {
+    await chrome.notifications.create(BREAK_NOTIF_ID, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+      // 行动指令放标题:人在 IDE 里瞄一眼就能站起来,连切窗口都不用
+      title: `该休息了:${idea.action.zh}`,
+      message: '点击回到浏览器,遮罩已经打开',
+      requireInteraction: true,   // 人在别的应用里,横幅 5 秒自动收走就白发了
+    });
+  } catch (err) {
+    console.error('[SimpleReminder] 系统通知发送失败', err);
+  }
+}
+
+/**
+ * 每次状态迁移后同步通知。幂等:break-start 只在真的进遮罩那一次出现。
+ * @param {any} rt
+ * @param {import('./lib/scheduler.js').SchedEvent[]} events
+ */
+async function syncBreakNotification(rt, events) {
+  if (rt.phase === 'breaking') {
+    if (events.some((e) => e.type === 'break-start')
+        && rt.idleSince === null
+        && !(await overlayCanCover())) {
+      await notifyBreakDue(rt);
+    }
+    return;
+  }
+  try { await chrome.notifications.clear(BREAK_NOTIF_ID); } catch { /* noop */ }
+}
+
 /* ═══════════════════ 顶层同步注册的监听器(四个入口)═══════════════════ */
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -72,6 +132,19 @@ chrome.idle.onStateChanged.addListener((state) => {
       (now, s, rt) => setIdleState(now, s, rt, state),
       `idle:${state}`,
     );
+  });
+});
+
+/* 点击通知 = 「我要回到浏览器」:把最后聚焦过的浏览器窗口带回前台。
+   遮罩自己还在标签页里等着,聚焦即见。 */
+chrome.notifications.onClicked.addListener((id) => {
+  if (id !== BREAK_NOTIF_ID) return;
+  queue(async () => {
+    try {
+      const w = await chrome.windows.getLastFocused();
+      if (w?.id != null) await chrome.windows.update(w.id, { focused: true });
+    } catch { /* 窗口已关,下次到点再说 */ }
+    try { await chrome.notifications.clear(id); } catch { /* noop */ }
   });
 });
 
@@ -198,6 +271,7 @@ async function applyTransition(fn, reason) {
   }
   await scheduleWake(wake);
   await syncBadge(now, rt);
+  await syncBreakNotification(rt, events);
 
   if (events.length) {
     console.debug('[SimpleReminder]', reason, '→', rt.phase, events.map((e) => e.type).join(','));
@@ -378,4 +452,4 @@ queue(async () => {
   } catch { /* noop */ }
 });
 
-export { PAUSE_FOREVER };
+export { PAUSE_FOREVER, BREAK_NOTIF_ID };

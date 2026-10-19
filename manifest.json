@@ -12,7 +12,7 @@
     "128": "icons/icon128.png"
   },
 
-  "permissions": ["alarms", "storage", "idle", "scripting"],
+  "permissions": ["alarms", "storage", "idle", "scripting", "notifications"],
   "host_permissions": ["<all_urls>"],
 
   "background": {

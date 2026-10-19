@@ -12,6 +12,10 @@ const changeListeners = [];
 const alarms = new Map();
 const badge = { text:null, color:null };
 const idleCfg = { seconds:null, state:'active' };
+const winState = { focused:true };            // 浏览器窗口是否持有 OS 焦点
+const winUpdates = [];
+const tabState = { url:'https://example.com/' };
+const notifs = { created:[], cleared:[] };
 const timers = [];                  // 捕获 setTimeout,避免真的等
 globalThis.setTimeout = (fn,ms)=>{ timers.push({fn,at:NOW+ms}); return timers.length; };
 globalThis.clearTimeout = (id)=>{ if(id) timers[id-1]=null; };
@@ -43,7 +47,12 @@ globalThis.chrome = {
   idle:{ onStateChanged:{addListener(f){L.idle=f}},
          setDetectionInterval(s){ idleCfg.seconds=s; },
          async queryState(){ return idleCfg.state; } },
-  tabs:{ query:async()=>[] },
+  notifications:{ create(id,o){ notifs.created.push({ id, ...o }); return id; },
+                  clear(id){ notifs.cleared.push(id); return true; },
+                  onClicked:{addListener(f){L.notifClick=f}} },
+  windows:{ getLastFocused:async()=>({ id:7, focused:winState.focused }),
+            update:async(id,o)=>{ winUpdates.push({ id, ...o }); } },
+  tabs:{ query:async()=>[{ id:42, url:tabState.url, active:true, discarded:false }] },
   scripting:{ executeScript:async()=>{} },
 };
 
@@ -58,8 +67,8 @@ const MIN=60_000;
 
 await settle();
 console.log('── worker 启动 ───────────────────────────');
-ok(!!L.alarm && !!L.startup && !!L.installed && !!L.msg && !!L.idle,
-   '五个入口都在顶层同步注册了(放进 async 会冷启动丢事件)');
+ok(!!L.alarm && !!L.startup && !!L.installed && !!L.msg && !!L.idle && !!L.notifClick,
+   '六个入口都在顶层同步注册了(放进 async 会冷启动丢事件)');
 ok(!L.click, 'manifest 挂了 default_popup,action.onClicked 永不触发,不该注册它');
 ok(rt()?.phase==='idle' && rt().nextFireAt===NOW+20*MIN, 'worker 启动即 reconcile,排好下一轮');
 ok(alarms.get('next-wake')?.when===NOW+20*MIN, '排了唯一的 next-wake 闹钟');
@@ -184,6 +193,62 @@ NOW = rt().prenoticeEndsAt; await send({type:'RECONCILE'}); await settle();
 ok(badge.text==='', '遮罩期间 badge 留空 —— 屏幕已经被盖住了,没人看');
 NOW = rt().breakEndsAt;
 await send({type:'BREAK_FINISHED', reason:'completed', ideaId:rt().currentIdeaId}); await settle();
+
+console.log('\n── ⭐ 系统通知兜底(焦点不在浏览器)────────');
+// 场景:人在 IDE 里写代码(键鼠一直动,idle 认为人「在」),浏览器没有
+// 焦点 —— 遮罩开了也没人看见,必须弹系统通知把人叫回来。
+winState.focused = false;
+NOW = rt().nextFireAt; await L.alarm({name:'next-wake'}); await settle();
+ok(rt().phase==='prenotice', '(前置)进预告');
+ok(notifs.created.length===0, '预告阶段不发通知 —— 通知说的是「该休息了」');
+NOW = rt().prenoticeEndsAt; await send({type:'RECONCILE'}); await settle();
+ok(rt().phase==='breaking', '(前置)进遮罩');
+ok(notifs.created.length===1, '⭐ 焦点不在浏览器 → 到点发系统通知');
+const n = notifs.created[0];
+ok(n.id===bg.BREAK_NOTIF_ID, '固定 id,重发自动替换旧的,不会堆一排');
+ok(n.title.includes('该休息了'), '标题就是「该休息了」');
+ok(n.title.includes('站') || n.title.includes('看') || n.title.includes('接'),
+   '标题里直接带行动指令 —— 人在 IDE 瞄一眼就能照做');
+ok(n.iconUrl.includes('icon128'), '带图标');
+ok(n.requireInteraction===true, '横幅停留 —— 人在别的应用里,5 秒自动收走就白发了');
+
+// 点击通知 → 浏览器回前台(遮罩就在标签页里等着)
+winUpdates.length = 0;
+await L.notifClick(bg.BREAK_NOTIF_ID); await settle();
+ok(winUpdates.some((u)=>u.focused===true), '⭐ 点击通知 → 浏览器窗口回到前台');
+ok(notifs.cleared.includes(bg.BREAK_NOTIF_ID), '点击后顺手清掉通知');
+await send({type:'BREAK_FINISHED', reason:'completed', ideaId:rt().currentIdeaId}); await settle();
+
+// 焦点在浏览器 → 不发,别和遮罩双重打扰
+winState.focused = true;
+notifs.created.length = 0;
+NOW = rt().nextFireAt; await L.alarm({name:'next-wake'}); await settle();
+NOW = rt().prenoticeEndsAt; await send({type:'RECONCILE'}); await settle();
+ok(notifs.created.length===0, '⭐ 焦点在浏览器 → 不发通知,遮罩自己盖上去');
+await send({type:'BREAK_FINISHED', reason:'completed', ideaId:rt().currentIdeaId}); await settle();
+
+// 人在浏览器,但活动标签页是注入不进去的页面 → 遮罩出不来,照样兜底
+tabState.url = 'chrome://extensions/';
+notifs.created.length = 0; notifs.cleared.length = 0;
+NOW = rt().nextFireAt; await L.alarm({name:'next-wake'}); await settle();
+NOW = rt().prenoticeEndsAt; await send({type:'RECONCILE'}); await settle();
+ok(notifs.created.length===1,
+   '⭐ 人在浏览器但遮罩出不来(chrome://)→ 也发通知,兜住注入硬边界');
+await send({type:'BREAK_FINISHED', reason:'completed', ideaId:rt().currentIdeaId}); await settle();
+ok(notifs.cleared.includes(bg.BREAK_NOTIF_ID),
+   '⭐ 休息一结束,过期通知立即清掉 —— 不赖在通知中心说谎');
+tabState.url = 'https://example.com/';
+
+// 真离开期间到点 → 不发:回来那一下会整轮重排,通知会睁眼说瞎话
+await chrome.storage.session.set({ mediaActiveAt: NOW - 10*MIN });   // 心跳过期,idle 算数
+await L.idle('idle'); await settle();
+ok(rt().idleSince!==null, '(前置)判定离开');
+notifs.created.length = 0;
+NOW = rt().nextFireAt; await L.alarm({name:'next-wake'}); await settle();
+NOW = rt().prenoticeEndsAt; await send({type:'RECONCILE'}); await settle();
+ok(notifs.created.length===0, '⭐ 离开期间到点不发通知 —— 回来会重排,通知会说谎');
+await L.idle('active'); await settle();
+ok(rt().phase==='idle' && rt().idleSince===null, '回来撤遮罩重排,状态干净收场');
 
 console.log('\n── 页面侧推一把(RECONCILE)──────────────');
 // 预告 8 秒 < alarm 下限 30 秒,闹钟管不了这个过渡,必须由页面触发

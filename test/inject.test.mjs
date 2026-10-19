@@ -8,6 +8,8 @@ const alarms=new Map();
 globalThis.chrome={
   storage:{sync:area('sync'),local:area('local'),session:area('session'),onChanged:{addListener(){}}},
   idle:{ onStateChanged:{addListener(){}}, setDetectionInterval(){}, async queryState(){ return 'active'; } },
+  notifications:{ create(){}, clear(){ return true; }, onClicked:{addListener(){}} },
+  windows:{ getLastFocused:async()=>({ id:1, focused:true }), update:async()=>{} },
   alarms:{onAlarm:{addListener(f){L.alarm=f}},
           async get(){ return undefined; }, async clear(n){return alarms.delete(n)}, async create(n,o){alarms.set(n,o)}},
   runtime:{onInstalled:{addListener(f){L.installed=f}},onStartup:{addListener(f){L.startup=f}},
