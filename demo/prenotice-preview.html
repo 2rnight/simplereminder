@@ -124,6 +124,7 @@ window.chrome = {
   },
   storage: {
     local: { async get() { return { runtime }; } },
+    session: { async set() { /* 媒体心跳,预览页没有视频,吞掉即可 */ } },
     onChanged: { addListener: (f) => listeners.push(f) },
   },
 };

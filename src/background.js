@@ -29,6 +29,30 @@ import {
     一个管正确性(必须准),一个管好看(可以丢)。 */
 const BADGE_ALARM = 'badge-tick';
 
+/* ═══════════════════ 媒体播放 = 在场 ═════════════════════════════════════
+   chrome.idle 只认键鼠输入:看视频 5 分钟没动就会报 idle。content script
+   对播放中的 video/audio 打心跳写 storage.session(不经过 SW,不吵醒它),
+   这里在心跳新鲜期内把 idle 事件**整个吞掉**。
+
+   不这么做的后果有两层,都是真实差评场景:
+     ① 看视频被判离开 → 再碰一下鼠标就触发「已经休息过了」的整轮重排,
+        看 50 分钟视频永远等不到遮罩;
+     ② 遮罩到点盖上时,用户想暂停视频的第一下输入被当成「回来了」,
+        遮罩被撤 —— 观感就是「触发遮罩却跳过了遮罩」。
+
+   只压制 idle / locked 里的 'idle':锁屏是明确的离开信号,照常处理。
+   'active'(回来了)永远照常处理。 */
+const MEDIA_KEY = 'mediaActiveAt';
+const MEDIA_FRESH_MS = 90_000;   // 心跳 30 秒一打,漏一拍也盖得住
+
+/** @returns {Promise<boolean>} */
+async function mediaFresh() {
+  try {
+    const got = await chrome.storage.session.get(MEDIA_KEY);
+    return Date.now() - (got[MEDIA_KEY] || 0) < MEDIA_FRESH_MS;
+  } catch { return false; }
+}
+
 /* ═══════════════════ 顶层同步注册的监听器(四个入口)═══════════════════ */
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -38,12 +62,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /* ⭐ 自然休息检测。离开电脑超过 idleResetSeconds 就等于已经休息过了,
-   回来不该立刻被糊一脸 —— 这是 PRODUCT 里点名的最经典差评场景。 */
+   回来不该立刻被糊一脸 —— 这是 PRODUCT 里点名的最经典差评场景。
+   ⚠️ 但「离开」的判定不能只信 chrome.idle:看视频没输入也会报 idle,
+   播放中的媒体心跳新鲜时直接吞掉(见上方媒体注释)。 */
 chrome.idle.onStateChanged.addListener((state) => {
-  queue(() => applyTransition(
-    (now, s, rt) => setIdleState(now, s, rt, state),
-    `idle:${state}`,
-  ));
+  queue(async () => {
+    if (state !== 'active' && await mediaFresh()) return;   // 看视频 = 在场
+    await applyTransition(
+      (now, s, rt) => setIdleState(now, s, rt, state),
+      `idle:${state}`,
+    );
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -275,9 +304,13 @@ async function syncIdleDetection() {
   const seconds = Math.max(15, Math.round(settings.idleResetSeconds));
   try {
     chrome.idle.setDetectionInterval(seconds);
-    // 冷启动时对齐一次:SW 被回收期间发生的 idle 变化收不到事件
+    // 冷启动时对齐一次:SW 被回收期间发生的 idle 变化收不到事件。
+    // 同样要过媒体守卫 —— SW 被回收重拉很常见,不能一醒来就把看视频的
+    // 人判成离开(那样下一次输入就会触发「已经休息过了」的重排)。
     const state = await chrome.idle.queryState(seconds);
-    await applyTransition((now, s, rt) => setIdleState(now, s, rt, state), `idle-query:${state}`);
+    if (state === 'active' || !(await mediaFresh())) {
+      await applyTransition((now, s, rt) => setIdleState(now, s, rt, state), `idle-query:${state}`);
+    }
   } catch (err) {
     console.error('[SimpleReminder] idle 检测初始化失败', err);
   }
@@ -323,6 +356,15 @@ async function injectIntoOpenTabs() {
    ===================================================================== */
 
 queue(async () => {
+  // ⭐ 给 content script 开 storage.session 的写权限(媒体心跳)。
+  // 默认只有 trusted context 能访问,content script 是 untrusted 的。
+  // 这个设置由浏览器侧记住,不用每次 worker 醒来都重新生效,但重设无害。
+  try {
+    await chrome.storage.session.setAccessLevel({
+      accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS',
+    });
+  } catch { /* noop */ }
+
   // ⭐ detectionInterval 要在**每次** worker 冷启动时重设。
   // SW 被回收后这个值不保证还在,而 onStartup 只在浏览器启动时触发一次 ——
   // 靠事件唤醒的那些冷启动根本走不到那里。

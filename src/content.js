@@ -65,6 +65,24 @@
   /** 遮罩底色 —— 与 break.html 同色,遮住 iframe 加载那一两帧的空隙 */
   const FALLBACK_BG = 'hsl(32 38% 8%)';
 
+  /* ── 媒体播放 = 在场 ─────────────────────────────────────────────────
+     chrome.idle 只看键鼠输入:看视频 5 分钟没动鼠标就被判「离开」。
+     后果不是小事 —— 遮罩到点盖上时,用户想暂停视频的**第一下输入**会被
+     idle 当成「回来了」,触发「已经休息过了」的重排:遮罩被撤、周期清零,
+     观感就是「遮罩一闪就没了」。所以播放中的媒体必须顶上输入信号。
+
+     心跳写 chrome.storage.session 而不是 sendMessage:后者每 30 秒都会把
+     service worker 吵醒一次,看一小时视频就是 120 次;session 存储不经过
+     SW,只有 background 在收到 idle 事件时才来读一眼。 */
+  const MEDIA_KEY = 'mediaActiveAt';
+  const MEDIA_BEAT_MS = 30_000;      // 播放中的心跳间隔(节流)
+  /** background 侧的判定窗口。心跳被 timer 节流到 1 分钟一次也覆盖得住 */
+  // (窗口在 background.js: MEDIA_FRESH_MS)
+
+  let lastMediaBeat = 0;
+  /** @type {any[]} 遮罩期间被我们按停的媒体 —— 只恢复我们停过的 */
+  let heldMedia = [];
+
   let /** @type {HTMLElement|null}       */ host   = null;
   let /** @type {ShadowRoot|null}        */ shadow = null;
   let /** @type {HTMLDialogElement|null} */ dialog = null;
@@ -237,6 +255,80 @@
   }
 
   /* ========================================================================
+     媒体:在场心跳 + 遮罩期间的暂停/恢复
+     ====================================================================== */
+
+  function mediaEls() {
+    try { return Array.from(document.querySelectorAll('video, audio')); }
+    catch { return []; }
+  }
+
+  /** 播放中 = 非暂停且没播完。直播 / 缓冲中也算 —— 宁可将来者误判为在,
+      也不能把正在看视频的人判成离开。 */
+  function anyPlaying() {
+    return mediaEls().some((m) => !m.paused && !m.ended);
+  }
+
+  function beatMedia(force) {
+    const now = Date.now();
+    if (!force && now - lastMediaBeat < MEDIA_BEAT_MS) return;
+    lastMediaBeat = now;
+    if (!alive()) return;
+    try {
+      const p = chrome.storage.session.set({ [MEDIA_KEY]: now });
+      p?.catch?.(() => { /* 上下文已失效 */ });
+    } catch { /* storage.session 不可用(极旧 Chrome)→ 退化成无媒体信号 */ }
+  }
+
+  /** play 事件:两件事 —— 报心跳;遮罩盖着时把新冒出来的播放摁住
+      (广告自动播放也算,不能让它在休息屏后面出声)。 */
+  function onMediaPlay(e) {
+    const el = e?.target;
+    if (overlayOpen && el && typeof el.pause === 'function') {
+      try {
+        el.pause();
+        if (!heldMedia.includes(el)) heldMedia.push(el);
+        return;
+      } catch { /* 不是媒体元素,忽略 */ }
+    }
+    beatMedia(true);
+  }
+
+  // timeupdate 由媒体管线驱动(不是定时器),后台标签页被节流也不受影响。
+  // 30 秒内的写在 beatMedia 里被节流掉,这里常驻成本就是一次时间比较。
+  function onMediaTick() { beatMedia(false); }
+
+  /** 遮罩盖上:把正在播的全部按停,记下来。只停「正在播」的 ——
+      本来就是暂停的不归我们管,别在结束时替用户点播放。 */
+  function pauseMediaForBreak() {
+    for (const el of mediaEls()) {
+      if (el.paused || el.ended) continue;
+      try { el.pause(); heldMedia.push(el); } catch { /* noop */ }
+    }
+  }
+
+  /** 遮罩收起 / 实例拆卸:恢复我们按停的。恢复播放不需要用户手势 ——
+      这些元素本来就在播,只是被我们打断了。 */
+  function resumeHeldMedia() {
+    const els = heldMedia;
+    heldMedia = [];
+    for (const el of els) {
+      try {
+        if (el.paused) {
+          const p = el.play();
+          p?.catch?.(() => { /* 自动播放策略拒绝就算了,用户自己点 */ });
+        }
+      } catch { /* noop */ }
+    }
+  }
+
+  // 脚本常驻,不依赖 mount:没有任何浮层时也要报心跳,否则「看视频算在场」
+  // 只在提醒前后生效,idle 判定会在视频看到一半时误伤。
+  document.addEventListener('play', onMediaPlay, true);
+  document.addEventListener('timeupdate', onMediaTick, true);
+  if (anyPlaying()) beatMedia(true);
+
+  /* ========================================================================
      挂载 / 卸载
      ------------------------------------------------------------------------
      只在预告或休息时才存在。其余时间本脚本在页面上零 DOM footprint ——
@@ -343,8 +435,36 @@
     requestAnimationFrame(() => dialog?.classList.remove('sr-noanim'));
   }
 
+  /**
+   * 全屏兜底。Top Layer 是「后进者在上」,后 showModal 的 dialog 理论上
+   * 永远盖得住全屏元素;但各家浏览器实现出过例外,而「遮罩被全屏视频
+   * 盖住」的观感是休息静默流逝 —— 用户看到的就是「触发了却跳过了遮罩」。
+   *
+   * 所以不赌理论,下一帧做一次命中测试实证:视口中心命中我们宿主的
+   * 影子树(closed shadow root 会被重定向回 host)→ 盖得住,收工;命中的
+   * 还是全屏元素 → 退出全屏把屏幕抢回来。**退出全屏不需要用户手势**
+   * (只有进入需要),所以这条路永远走得通。
+   */
+  function ensureVisibleOverFullscreen() {
+    if (!overlayOpen || !document.fullscreenElement) return;
+    requestAnimationFrame(() => {
+      if (!overlayOpen || !document.fullscreenElement) return;
+      try {
+        const hit = document.elementFromPoint(
+          window.innerWidth / 2, window.innerHeight / 2,
+        );
+        if (hit === host || (hit && host?.contains(hit))) return;  // 盖得住
+        const fs = document.fullscreenElement;
+        if (hit === fs || (hit && fs?.contains(hit))) {
+          document.exitFullscreen().catch(() => {});
+          reassertTopLayer();
+        }
+      } catch { /* 命中测试不可用就不折腾,维持 reassert 兜底 */ }
+    });
+  }
+
   function onFullscreenChange() {
-    if (overlayOpen) reassertTopLayer();
+    if (overlayOpen) { reassertTopLayer(); ensureVisibleOverFullscreen(); }
     // popover 不受全屏影响到同等程度,但重新 show 一次代价极小
     if (barOpen) { try { bar?.showPopover(); } catch { /* 已经在顶层 */ } }
   }
@@ -513,6 +633,7 @@
     if (overlayOpen) return;
     overlayOpen = true;
     clearTimeout(closeTimer);
+    pauseMediaForBreak();          // 视频先停,再掀遮罩(见 PRODUCT:遮罩期间暂停播放)
     mount();
     if (!dialog || !iframe) return;
 
@@ -530,6 +651,8 @@
       }
       // 焦点给 dialog 自己,不让任何按钮被自动聚焦而画出焦点环
       dialog.focus();
+      // 全屏视频下盖不住的话,这里会把屏幕抢回来(见 ensureVisibleOverFullscreen)
+      ensureVisibleOverFullscreen();
     };
     iframe.addEventListener('load', reveal, { once: true });
     loadTimer = setTimeout(reveal, IFRAME_LOAD_TIMEOUT);
@@ -538,6 +661,7 @@
   function hideOverlay() {
     if (!overlayOpen) return;
     overlayOpen = false;
+    resumeHeldMedia();             // 遮罩一收就把我们按停的播回去,不等淡出
     clearTimeout(loadTimer);
     if (!dialog || !dialog.open) { unmountIfIdle(); return; }
 
@@ -613,7 +737,10 @@
     overlayOpen = false;
     barOpen = false;
     barHoldUntil = 0;
+    resumeHeldMedia();             // 扩展重载不能把用户的视频永久按停
     try { chrome.storage.onChanged.removeListener(onStorageChanged); } catch { /* noop */ }
+    document.removeEventListener('play', onMediaPlay, true);
+    document.removeEventListener('timeupdate', onMediaTick, true);
     window.removeEventListener('message', onIframeMessage);
     unmount();
     try { delete window.__SR_TEARDOWN__; } catch { /* noop */ }

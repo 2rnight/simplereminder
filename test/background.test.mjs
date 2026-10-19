@@ -27,7 +27,8 @@ function mkArea(name){
   };
 }
 globalThis.chrome = {
-  storage:{ sync:mkArea('sync'), local:mkArea('local'), session:mkArea('session'),
+  storage:{ sync:mkArea('sync'), local:mkArea('local'),
+            session:{...mkArea('session'), setAccessLevel(){}},
             onChanged:{ addListener(f){ changeListeners.push(f); } } },
   runtime:{ onStartup:{addListener(f){L.startup=f}}, onInstalled:{addListener(f){L.installed=f}},
             onMessage:{addListener(f){L.msg=f}}, getManifest:()=>({version:'0.1.0'}),
@@ -139,6 +140,38 @@ await L.idle('idle'); await settle();
 NOW += 6*MIN;
 await L.idle('active'); await settle();
 ok(rt().phase==='idle', '⭐ 离开期间盖上的遮罩,回来时撤掉 —— 他刚休息完');
+
+console.log('\n── ⭐ 看视频 = 在场(媒体心跳压制 idle)──');
+// content.js 对播放中的媒体打心跳(storage.session.mediaActiveAt)。
+// 心跳新鲜时 chrome.idle 报的 idle 必须整个吞掉 —— 看视频 5 分钟没动鼠标
+// 不是离开。否则用户一碰鼠标就触发「已经休息过了」重排,视频看 50 分钟
+// 也等不到遮罩;遮罩真盖上了也会被第一下输入撤掉(「跳过遮罩」)。
+await chrome.storage.session.set({ mediaActiveAt: NOW - 20_000 });
+await L.idle('idle'); await settle();
+ok(rt().idleSince===null, '⭐ 媒体心跳新鲜 → idle 事件被吞掉(看视频不算离开)');
+ok(rt().nextFireAt!==null, '周期原封不动 —— 该到点照样到点');
+ok(!!alarms.get('badge-tick'), '人在(在看视频)→ badge 心跳照跑');
+
+await chrome.storage.session.set({ mediaActiveAt: NOW - 120_000 });
+await L.idle('idle'); await settle();
+ok(rt().idleSince===NOW, '心跳过期(>90 秒)→ idle 恢复正常判定');
+
+await chrome.storage.session.set({ mediaActiveAt: NOW });
+await L.idle('active'); await settle();
+ok(rt().idleSince===null && rt().nextFireAt===NOW+20*MIN,
+   'active(回来了)永远照常处理,不看媒体心跳');
+
+// SW 被回收重新拉起时走 queryState 对齐,同样要过媒体守卫
+await chrome.storage.session.set({ mediaActiveAt: NOW - 5_000 });
+idleCfg.state='idle';
+await chrome.storage.sync.set({settings:{idleResetSeconds:301}});
+await settle();
+ok(rt().idleSince===null,
+   '⭐ 冷启动 queryState 对齐也被媒体心跳挡住 —— SW 重拉不能把看视频的人判成离开');
+idleCfg.state='active';
+await chrome.storage.sync.set({settings:{idleResetSeconds:300}});
+await settle();
+ok(rt().idleSince===null, '恢复 settings 后状态干净');
 
 console.log('\n── badge ─────────────────────────────────');
 NOW = rt().nextFireAt - 7*MIN; await L.alarm({name:'badge-tick'}); await settle();

@@ -32,6 +32,7 @@ function makeEl(tag = 'div') {
     setAttribute(k, v) { el.attrs[k] = v; },
     getAttribute(k) { return el.attrs[k]; },
     appendChild() {}, append() {}, remove() {},
+    contains: () => false,
     addEventListener(t, f) { (el.handlers[t] ||= []).push(f); },
     removeEventListener() {},
     attachShadow: () => ({ append() {} }),
@@ -60,7 +61,19 @@ function flushTimers() {
   todo.forEach((t) => t.f());
 }
 const created = [];
-const log = { storageAdd: 0, storageRemove: 0, winAdd: 0, winRemove: 0, msgs: [] };
+const log = { storageAdd: 0, storageRemove: 0, winAdd: 0, winRemove: 0, msgs: [], sessionSets: [] };
+/** 测试用的 video/audio 桩池,content.js 的 document.querySelectorAll 从这里取 */
+const mediaPool = [];
+function makeMedia(playing = true) {
+  return {
+    paused: !playing,
+    ended: false,
+    pauses: 0,
+    plays: 0,
+    pause() { this.paused = true; this.pauses++; },
+    play() { this.paused = false; this.plays++; return { catch() {} }; },
+  };
+}
 
 const ctx = {
   console,
@@ -78,10 +91,12 @@ const ctx = {
   DOMParser: class {},
   document: {
     activeElement: null,
+    fullscreenElement: null,
     createElement(tag) { const e = makeEl(tag); created.push(e); return e; },
     documentElement: { appendChild() {} },
     addEventListener(t, f) { (ctx.document.__h ||= {})[t] = f; },
     removeEventListener() {},
+    querySelectorAll: () => mediaPool.slice(),
   },
   chrome: {
     runtime: {
@@ -92,6 +107,7 @@ const ctx = {
     },
     storage: {
       local: { get: async () => ({}) },
+      session: { set: async (o) => { log.sessionSets.push(o); } },
       onChanged: {
         addListener(f) { log.storageAdd++; ctx.__onChanged = f; },
         removeListener() { log.storageRemove++; },
@@ -244,12 +260,97 @@ log.msgs.length = 0;
 keydown({ key: ' ', code: 'Space', preventDefault() {} });
 ok(log.msgs.length === 0, '遮罩已盖上时空格不再延迟 —— 那时只能长按跳过');
 
-/* ════════════ 5. 拆卸 ════════════ */
+/* ════════════ 5. 媒体:在场心跳 + 遮罩暂停 ════════════ */
+console.log('\n── 媒体播放 = 在场 ─────────────────────────');
+// 先把上一节盖着的遮罩收干净,再摆媒体
+fire({ phase: 'idle' });
+flushTimers();
+log.sessionSets.length = 0;
+
+const vid1 = makeMedia(true);
+mediaPool.push(vid1);
+ctx.document.__h.play({ target: vid1 });
+ok(log.sessionSets.length === 1 && typeof log.sessionSets[0].mediaActiveAt === 'number',
+   '⭐ 开始播放立刻写 storage.session 心跳(看视频算在场,不再 5 分钟就判「已经休息过了」)');
+ctx.document.__h.timeupdate({});
+ok(log.sessionSets.length === 1, '30 秒内的心跳被节流 —— timeupdate 不会每帧都写');
+
+// 遮罩盖上 → 正在播的视频被按停
+fire({ phase: 'breaking', breakStartedAt: Date.now(), breakEndsAt: Date.now() + 20000,
+       currentIdeaId: 'stand' });
+await tick();
+ok(vid1.paused && vid1.pauses >= 1, '⭐ 遮罩盖上 → 正在播放的视频被暂停');
+
+// 遮罩期间冒出来的播放(广告自动播放)也被摁住
+const ad = makeMedia(true);
+mediaPool.push(ad);
+ctx.document.__h.play({ target: ad });
+ok(ad.paused && ad.pauses >= 1, '⭐ 遮罩期间新开始的播放也立刻摁停(别在休息屏后面出声)');
+
+// 遮罩收起 → 只把我们按停的恢复
+fire({ phase: 'idle' });
+ok(!vid1.paused && vid1.plays >= 1, '⭐ 遮罩结束 → 视频自动恢复播放');
+ok(!ad.paused && ad.plays >= 1, '遮罩期间被摁停的也一并恢复');
+
+// 本来就是暂停的,不许替用户点播放
+const vid2 = makeMedia(false);
+mediaPool.push(vid2);
+fire({ phase: 'breaking', breakStartedAt: Date.now(), breakEndsAt: Date.now() + 20000,
+       currentIdeaId: 'stand' });
+await tick();
+fire({ phase: 'idle' });
+ok(vid2.pauses === 0 && vid2.plays === 0,
+   '本来就是暂停的媒体一根指头都不碰 —— 结束时不许替用户点播放');
+
+/* ════════════ 6. 全屏兜底 ════════════ */
+console.log('\n── 全屏兜底:遮罩被盖住就抢回来 ─────────────');
+// Top Layer「后进者在上」理论上 dialog 永远盖得住全屏元素;不赌实现 ——
+// 命中测试实证,输了就退出全屏(退出不需要用户手势)。
+const fakeFs = makeEl('video');
+ctx.document.fullscreenElement = fakeFs;
+let exited = 0;
+ctx.document.exitFullscreen = () => { exited++; return { catch() {} }; };
+ctx.document.elementFromPoint = () => fakeFs;   // 命中的还是全屏元素 = 被盖住
+
+fire({ phase: 'idle' }); flushTimers();
+fire({ phase: 'breaking', breakStartedAt: Date.now(), breakEndsAt: Date.now() + 20000,
+       currentIdeaId: 'stand' });
+await tick();         // 给足帧预算
+flushTimers();        // 跑 reveal(showModal + 排一帧命中测试)
+await tick();         // 跑那一帧
+ok(exited === 1,
+   '⭐ 命中测试输给全屏元素 → 自动退出全屏把遮罩抢回来(观感=「跳过遮罩」的根治)');
+
+// 盖得住(命中宿主影子树)→ 不折腾用户的全屏状态
+exited = 0;
+const hostEl = findByTag('SR-OVERLAY-HOST');
+ctx.document.elementFromPoint = () => hostEl;
+fire({ phase: 'idle' }); flushTimers();
+fire({ phase: 'breaking', breakStartedAt: Date.now(), breakEndsAt: Date.now() + 20000,
+       currentIdeaId: 'stand' });
+await tick();
+flushTimers();
+await tick();
+ok(exited === 0, '⭐ 盖得住(命中自己的宿主)→ 不退出全屏,不打扰');
+
+ctx.document.fullscreenElement = null;
+
+/* ════════════ 7. 拆卸 ════════════ */
 console.log('\n── 拆卸 ───────────────────────────────────');
+// 拆卸也要恢复媒体:扩展重载不能把用户的视频永久按停
+fire({ phase: 'idle' }); flushTimers();   // 先收掉全屏节盖着的遮罩
+const vid3 = makeMedia(true);
+mediaPool.push(vid3);
+fire({ phase: 'breaking', breakStartedAt: Date.now(), breakEndsAt: Date.now() + 20000,
+       currentIdeaId: 'stand' });
+await tick();
+ok(vid3.paused, '(前置)遮罩把视频按停了');
 ctx.chrome.runtime.id = undefined;
 let threw = false;
 try { ctx.window.__SR_TEARDOWN__(); } catch (e) { threw = true; console.log('  ' + e.message); }
 ok(!threw, '上下文失效后调用 teardown 不抛异常');
+ok(!vid3.paused && vid3.plays >= 1,
+   '⭐ teardown 恢复被按停的视频 —— 重载不能把用户的视频永久停掉');
 
 console.log(`\n${fail ? '✗' : '✓'} ${pass} 通过 / ${fail} 失败`);
 process.exit(fail ? 1 : 0);

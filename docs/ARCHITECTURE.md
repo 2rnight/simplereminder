@@ -227,8 +227,9 @@ content script 在**每个标签页各跑一份**。若让 `break.html` 自己�
   postponeMinutes: 5,
   skipHoldMs: 1000,
   preNoticePosition: 'top',       // v0.1 固定 top
-  interruptFullscreenVideo: false,
-  idleResetSeconds: 60,           // 实际取 max(durationSeconds, 60)
+  idleResetSeconds: 300,          // 5 分钟;同时是 chrome.idle 的 detectionInterval
+                                  // (全屏视频「默认不打断」的 interruptFullscreenVideo
+                                  //  已随产品决定反转移除:全屏照常打断)
   ideas: [                        // 用户勾选状态
     { id: 'stand', enabled: true  },
     { id: 'eyes',  enabled: false },
@@ -413,6 +414,20 @@ docs/
 | ⭐ **离开期间不要动 `nextFireAt`** | 试图在离开时"暂停周期"会引出一堆边界。更稳的做法:人不在时该响就响、该结束就结束(反正没人看见),**回来那一下的 `active` 把整轮重排**。回来时正盖着遮罩就一并撤掉 —— 他刚休息完 |
 | **`setDetectionInterval` 要在每次 worker 冷启动时重设** | `onStartup` 只在浏览器启动时触发一次,靠事件唤醒的冷启动走不到那里 |
 | **badge 用独立的 periodic alarm** | 和 `next-wake` 分开:一个管正确性(必须准),一个管好看(丢了无所谓)。⭐ 心跳只在「idle 相位 + 未暂停 + 人在电脑前」时跑 —— 离开电脑时没人看 badge,再每分钟唤醒 SW 纯属耗电 |
+
+### 自用阶段修的三个 bug(2026-10):看视频全军覆没
+
+背景:自用时发现「看视频 50 分钟根本等不到遮罩,系统还以为已经休息过了」
++「全屏时触发遮罩会跳过遮罩」+「遮罩期间视频还在响」。三件事一个根因系。
+
+| 事实 | 影响 |
+|---|---|
+| ⭐ **`chrome.idle` 只认键鼠输入** | 看视频 5 分钟没动鼠标就报 idle,人却妥妥在场。**收到 idle 事件 ≠ 人不在**。补法:content script 对播放中的 video/audio 打心跳写 `storage.session.mediaActiveAt`(30 秒一打),background 在 90 秒新鲜窗内把 idle 事件整个吞掉 —— 看视频算在场 |
+| ⭐ **心跳走 `storage.session`,不走 `sendMessage`** | 每 30 秒一条消息就是每 30 秒吵醒一次 service worker,看一小时视频 120 次;写 session 存储不经过 SW,background 只在收到 idle 事件时来读一眼。⚠️ 默认 content script **无权**写 session(`TRUSTED_CONTEXTS`),要在 worker 启动时 `setAccessLevel('TRUSTED_AND_UNTRUSTED_CONTEXTS')` |
+| ⭐ **「回来撤遮罩」会误伤看视频的人** | 遮罩到点盖上时,用户想暂停视频的**第一下输入**触发 idle 的 `active` →「回来了,已经休息过了」→ 撤遮罩 + 整轮重排。观感就是「触发遮罩却跳过遮罩」。根因同第一行:媒体在场后 `idleSince` 根本不会被误置 |
+| ⭐ **遮罩期间要按停播放,结束恢复** | 只停「正在播」的(本来就是暂停的不许替用户点播放),只恢复「我们停过的」;`teardown` 也要恢复 —— 扩展重载不能把用户的视频永久停掉。遮罩期间新冒出来的 play(广告自动播放)也立刻摁住 |
+| ⭐ **全屏抢层不赌理论** | Top Layer「后进者在上」,后 `showModal` 的 dialog 理论上永远盖得住全屏元素;但各家实现出过例外,而「被盖住」的表现是休息静默流逝。兜底:下一帧做命中测试实证,输了就 `exitFullscreen()` 把屏幕抢回来 —— **退出全屏不需要用户手势**(只有进入需要) |
+| **产品决定反转:全屏视频照常打断** | 原「全屏视频默认不打断」(interruptFullscreenVideo)从未实现,且与「遮罩必须真的盖上去」冲突,随本次修复移除。全屏看视频:遮罩盖上 + 视频暂停,结束自动续播(不恢复全屏 —— 恢复全屏要用户手势,做不到) |
 
 ### 第 4 步落地时确认的事实
 

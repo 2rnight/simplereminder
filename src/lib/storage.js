@@ -19,13 +19,15 @@ export const KEY_STATS    = 'stats';      // chrome.storage.local
  * @property {number} postponeMinutes
  * @property {number} skipHoldMs
  * @property {'top'} preNoticePosition
- * @property {boolean} interruptFullscreenVideo
  * @property {number} idleResetSeconds  离开多久算"已经休息过了"。
  *   ⚠️ 不能设小。封板时写的 max(duration, 60) 是错的 —— **60 秒没有输入
  *   不等于离开**,读一屏长文就够了。那样会让读者被判定成离开、从此不再
  *   提醒,而读者恰恰是最需要提醒的人。取 5 分钟(与 Stretchly 一致)。
  *   这个值同时被用作 chrome.idle 的 detectionInterval,所以"收到 idle
  *   事件"本身就等价于"已经离开满这么久"。
+ *   ⚠️ 但收到 idle 事件 ≠ 人不在:看视频 5 分钟没动鼠标也会报 idle。
+ *   播放中的媒体由 content.js 打心跳(storage.session 的 mediaActiveAt),
+ *   心跳新鲜期内 background 会吞掉 idle 事件 —— 看视频算在场。
  * @property {{id:string, enabled:boolean}[]} ideas
  */
 
@@ -37,7 +39,6 @@ export const DEFAULT_SETTINGS = {
   postponeMinutes: 5,
   skipHoldMs: 1000,
   preNoticePosition: 'top',
-  interruptFullscreenVideo: false,
   idleResetSeconds: 300,
   ideas: [
     { id: 'stand', enabled: true  },
